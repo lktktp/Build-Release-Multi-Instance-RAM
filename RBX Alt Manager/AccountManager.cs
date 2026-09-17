@@ -118,7 +118,7 @@ namespace RBX_Alt_Manager
             Watcher = IniSettings.Section("Watcher");
             Prompts = IniSettings.Section("Prompts");
 
-            if (!General.Exists("CheckForUpdates")) General.Set("CheckForUpdates", "true");
+            if (!General.Exists("CheckForUpdates")) General.Set("CheckForUpdates", "false");
             if (!General.Exists("AccountJoinDelay")) General.Set("AccountJoinDelay", "15");
             if (!General.Exists("AsyncJoin")) General.Set("AsyncJoin", "false");
             if (!General.Exists("DisableAgingAlert")) General.Set("DisableAgingAlert", "false");
@@ -705,7 +705,7 @@ namespace RBX_Alt_Manager
                         Assembly assembly = Assembly.GetExecutingAssembly();
                         FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(assembly.Location);
                         WC.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36";
-                        string Releases = WC.DownloadString("https://api.github.com/repos/ic3w0lf22/Roblox-Account-Manager/releases/latest");
+                        string Releases = WC.DownloadString("https://api.github.com/repos/DinoKob/Build-Release-Multi-Instance-RAM/releases/latest");
                         Match match = Regex.Match(Releases, @"""tag_name"":\s*""?([^""]+)");
 
                         if (match.Success)
@@ -724,19 +724,7 @@ namespace RBX_Alt_Manager
 
                                 if (ShouldUpdate)
                                 {
-                                    File.WriteAllBytes(AFN, File.ReadAllBytes(Application.ExecutablePath));
-                                    Process.Start(AFN, "-update");
-                                    Environment.Exit(1);
-                                    //if (File.Exists(AFN))
-                                    //{
-                                    //    Process.Start(AFN, "skip");
-                                    //    Environment.Exit(1);
-                                    //}
-                                    //else
-                                    //{
-                                    //    MessageBox.Show("You do not have the auto updater downloaded, go to the github page and download the latest release.");
-                                    //    Process.Start("https://github.com/ic3w0lf22/Roblox-Account-Manager/releases");
-                                    //}
+                                    Process.Start("https://github.com/DinoKob/Build-Release-Multi-Instance-RAM/releases/latest");
                                 }
                             }
                         }

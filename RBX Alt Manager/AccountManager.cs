@@ -167,7 +167,10 @@ namespace RBX_Alt_Manager
             if (!AccountControl.Exists("NexusPort")) AccountControl.Set("NexusPort", "5242");
 
             InitializeComponent();
-            this.Text = "Dino Multi-Roblox Manager (Dino Edition v4.0)";
+            // Auto-clean any background Roblox instances right at launch
+            KillExistingRobloxProcesses();
+
+            this.Text = "Multi-Roblox Account Manager [lktktp Edition] v4.1";
             this.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
             this.Rescale();
 
@@ -1186,8 +1189,8 @@ namespace RBX_Alt_Manager
 
         private void AccountManager_Shown(object sender, EventArgs e)
         {
-            if (!UpdateMultiRoblox() && !General.Get<bool>("HideRbxAlert"))
-                MessageBox.Show("WARNING: Roblox is currently running, multi roblox will not work until you restart the account manager with roblox closed.", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            // Automatically clean background Roblox instances and acquire Multi-Roblox mutex without annoying warning dialog
+            UpdateMultiRoblox();
 
             int Major = Environment.OSVersion.Version.Major, Minor = Environment.OSVersion.Version.Minor;
 
@@ -1289,34 +1292,63 @@ namespace RBX_Alt_Manager
                 LaunchNexus.PerformClick();
         }
 
+        public static void KillExistingRobloxProcesses()
+        {
+            string[] rbxProcessNames = { "RobloxPlayerBeta", "RobloxPlayerLauncher", "RobloxCrashHandler" };
+            foreach (string name in rbxProcessNames)
+            {
+                try
+                {
+                    foreach (Process proc in Process.GetProcessesByName(name))
+                    {
+                        try
+                        {
+                            Program.Logger.Info($"[Auto-Clean] Closing background Roblox process {proc.ProcessName} (PID: {proc.Id}) so Multi-Roblox starts cleanly.");
+                            proc.Kill();
+                            proc.WaitForExit(1000);
+                        }
+                        catch (Exception ex)
+                        {
+                            Program.Logger.Warn($"Failed to kill {name}: {ex.Message}");
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
         public bool UpdateMultiRoblox()
         {
             bool Enabled = General.Get<bool>("EnableMultiRbx");
 
             if (Enabled && rbxMultiMutex == null)
+            {
+                // Kill any existing background Roblox processes so they don't hold the mutex or block Multi-Roblox
+                KillExistingRobloxProcesses();
+
                 try
                 {
                     rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex");
 
                     if (!rbxMultiMutex.WaitOne(TimeSpan.Zero, true))
                     {
-                        // MULTI-INSTANCE FIX: If we can't acquire the mutex, try to close it and retry
-                        // This handles the case where Roblox was started before RAM
                         try
                         {
                             rbxMultiMutex.Close();
                             rbxMultiMutex = null;
-                            
-                            // Wait briefly and try again
+
+                            // Force kill any remaining Roblox processes and retry
+                            KillExistingRobloxProcesses();
                             System.Threading.Thread.Sleep(500);
+
                             rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex");
-                            
+
                             if (!rbxMultiMutex.WaitOne(TimeSpan.Zero, true))
                             {
                                 Program.Logger.Error("Failed to acquire ROBLOX_singletonMutex on retry");
                                 return false;
                             }
-                            
+
                             Program.Logger.Info("Successfully acquired ROBLOX_singletonMutex on retry");
                         }
                         catch
@@ -1330,6 +1362,7 @@ namespace RBX_Alt_Manager
                     }
                 }
                 catch { return false; }
+            }
             else if (!Enabled && rbxMultiMutex != null)
             {
                 rbxMultiMutex.Close();

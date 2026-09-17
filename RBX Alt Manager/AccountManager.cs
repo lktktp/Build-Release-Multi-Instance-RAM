@@ -119,8 +119,8 @@ namespace RBX_Alt_Manager
             Prompts = IniSettings.Section("Prompts");
 
             if (!General.Exists("CheckForUpdates")) General.Set("CheckForUpdates", "false");
-            if (!General.Exists("AccountJoinDelay")) General.Set("AccountJoinDelay", "15");
-            if (!General.Exists("AsyncJoin")) General.Set("AsyncJoin", "false");
+            if (!General.Exists("AccountJoinDelay")) General.Set("AccountJoinDelay", "2");
+            if (!General.Exists("AsyncJoin")) General.Set("AsyncJoin", "true");
             if (!General.Exists("DisableAgingAlert")) General.Set("DisableAgingAlert", "false");
             if (!General.Exists("SavePasswords")) General.Set("SavePasswords", "true");
             if (!General.Exists("ServerRegionFormat")) General.Set("ServerRegionFormat", "<city>, <countryCode>", "Visit http://ip-api.com/json/1.1.1.1 to see available format options");
@@ -2124,15 +2124,81 @@ namespace RBX_Alt_Manager
 
         private async Task LaunchAccounts(List<Account> Accounts, long PlaceID, string JobID, bool FollowUser = false, bool VIPServer = false)
         {
-            // MULTI-INSTANCE FIX: Increased default delay from 8 to 15 seconds
-            // This gives Roblox enough time to fully initialize before launching the next instance
-            int Delay = General.Exists("AccountJoinDelay") ? General.Get<int>("AccountJoinDelay") : 15;
+            int Delay = General.Exists("AccountJoinDelay") ? General.Get<int>("AccountJoinDelay") : 2;
 
             bool AsyncJoin = General.Get<bool>("AsyncJoin");
             CancellationTokenSource Token = LauncherToken;
 
+            if (Token == null || Token.IsCancellationRequested)
+                Token = LauncherToken = new CancellationTokenSource();
+
             int launchedCount = 0;
 
+            if (AsyncJoin)
+            {
+                // =========================================================
+                // PARALLEL / CONCURRENT LAUNCH ("เปิดพร้อมกัน")
+                // Launch all selected accounts concurrently with a smooth
+                // 1-second micro-stagger so Windows and Roblox don't collide
+                // =========================================================
+                Program.Logger.Info($"[Parallel Launch] Starting parallel launch for {Accounts.Count} accounts with 1s micro-stagger...");
+
+                var launchTasks = new List<Task>();
+
+                for (int i = 0; i < Accounts.Count; i++)
+                {
+                    if (Token.IsCancellationRequested) break;
+
+                    Account account = Accounts[i];
+                    long PlaceId = PlaceID;
+                    string JobId = JobID;
+
+                    if (!FollowUser)
+                    {
+                        if (!string.IsNullOrEmpty(account.GetField("SavedPlaceId")) && long.TryParse(account.GetField("SavedPlaceId"), out long PID)) PlaceId = PID;
+                        if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
+                    }
+
+                    int index = i;
+                    launchTasks.Add(Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (index > 0)
+                            {
+                                await Task.Delay(index * 1000, Token.Token);
+                            }
+
+                            if (!Token.IsCancellationRequested)
+                            {
+                                Program.Logger.Info($"[Parallel Launch] Launching account {index + 1}/{Accounts.Count}: {account.Username}");
+                                string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
+                                if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
+                                {
+                                    Program.Logger.Error($"[Parallel Launch] Failed to launch {account.Username}: {res}");
+                                }
+                            }
+                        }
+                        catch (TaskCanceledException) { }
+                        catch (Exception ex)
+                        {
+                            Program.Logger.Error($"[Parallel Launch] Error launching {account.Username}: {ex.Message}");
+                        }
+                    }));
+                }
+
+                await Task.WhenAll(launchTasks);
+                Program.Logger.Info($"[Parallel Launch] Finished launching {Accounts.Count} accounts in parallel!");
+
+                Token.Cancel();
+                Token.Dispose();
+                return;
+            }
+
+            // =========================================================
+            // FAST SEQUENTIAL LAUNCH FALLBACK ("เปิดต่อไวๆ")
+            // Launches account 1, waits minimal delay (default 2s), then account 2
+            // =========================================================
             foreach (Account account in Accounts)
             {
                 if (Token.IsCancellationRequested) break;
@@ -2146,27 +2212,23 @@ namespace RBX_Alt_Manager
                     if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
                 }
 
-                Program.Logger.Info($"Launching account {launchedCount + 1}/{Accounts.Count}: {account.Username}");
+                Program.Logger.Info($"[Sequential Launch] Launching account {launchedCount + 1}/{Accounts.Count}: {account.Username}");
 
-                await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
+                string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
+                if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
+                {
+                    Program.Logger.Error($"[Sequential Launch] Failed to launch {account.Username}: {res}");
+                }
                 launchedCount++;
 
                 if (launchedCount < Accounts.Count) // Don't wait after the last account
                 {
-                    if (AsyncJoin)
+                    int delayMs = Math.Max(500, Delay * 1000);
+                    try
                     {
-                        // MULTI-INSTANCE FIX: Even in async mode, wait at least 5 seconds
-                        // to let the Roblox process stabilize before launching next
-                        await Task.Delay(5000);
-
-                        DateTime asyncTimeout = DateTime.Now.AddSeconds(60);
-                        while (!LaunchNext && DateTime.Now < asyncTimeout)
-                            await Task.Delay(50);
+                        await Task.Delay(delayMs, Token.Token);
                     }
-                    else
-                    {
-                        await Task.Delay(Delay * 1000);
-                    }
+                    catch (TaskCanceledException) { break; }
                 }
 
                 LaunchNext = false;
@@ -2174,7 +2236,7 @@ namespace RBX_Alt_Manager
 
             LaunchNext = false;
 
-            Program.Logger.Info($"Finished launching {launchedCount} accounts");
+            Program.Logger.Info($"Finished launching {launchedCount} accounts sequentially");
 
             Token.Cancel();
             Token.Dispose();
@@ -2188,7 +2250,7 @@ namespace RBX_Alt_Manager
         }
 
         private void infoToolStripMenuItem1_Click(object sender, EventArgs e) =>
-            MessageBox.Show("Multi-Roblox Account Manager (lktktp Edition v4.0)\nCreated by lktktp\nMulti-Instance & Modern Roblox Launcher Fixed.", "Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Multi-Roblox Account Manager (lktktp Edition v4.1)\nCreated by lktktp\nMulti-Instance, Modern Roblox & Turbo Parallel Launch Fixed.", "Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         private void groupsToolStripMenuItem_Click(object sender, EventArgs e) =>
             MessageBox.Show("Groups can be sorted by naming them a number then whatever you want.\nFor example: You can put Group Apple on top by naming it '001 Apple' or '1Apple'.\nThe numbers will be hidden from the name but will be correctly sorted depending on the number.\nAccounts can also be dragged into groups.", "Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);

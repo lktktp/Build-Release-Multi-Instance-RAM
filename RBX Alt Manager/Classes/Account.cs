@@ -696,33 +696,33 @@ namespace RBX_Alt_Manager
                             Program.Logger.Info($"Started Roblox protocol URI for {Username}");
                         }
 
-                        // Wait for Roblox window to appear or process to settle
+                        // Notify launcher immediately so next account can launch without waiting 20s
+                        AccountManager.Instance.NextAccount();
+
+                        // Wait for Roblox window to appear and adjust position asynchronously in background
                         if (RbxProcess != null)
                         {
-                            DateTime timeout = DateTime.Now.AddSeconds(20);
-                            while (DateTime.Now < timeout)
+                            _ = Task.Run(async () =>
                             {
-                                try
+                                DateTime timeout = DateTime.Now.AddSeconds(20);
+                                while (DateTime.Now < timeout)
                                 {
-                                    RbxProcess.Refresh();
-                                    if (RbxProcess.HasExited) break;
-                                    if (RbxProcess.MainWindowHandle != IntPtr.Zero)
+                                    try
                                     {
-                                        Program.Logger.Info($"Roblox window opened for {Username} (PID: {RbxProcess.Id})");
-                                        break;
+                                        RbxProcess.Refresh();
+                                        if (RbxProcess.HasExited) break;
+                                        if (RbxProcess.MainWindowHandle != IntPtr.Zero)
+                                        {
+                                            Program.Logger.Info($"Roblox window opened for {Username} (PID: {RbxProcess.Id})");
+                                            AdjustWindowPosition();
+                                            break;
+                                        }
                                     }
+                                    catch { break; }
+                                    await Task.Delay(500);
                                 }
-                                catch { break; }
-                                await Task.Delay(500);
-                            }
+                            });
                         }
-                        else
-                        {
-                            await Task.Delay(3000);
-                        }
-
-                        AccountManager.Instance.NextAccount();
-                        _ = Task.Run(AdjustWindowPosition);
                     }
                     catch (Exception x)
                     {

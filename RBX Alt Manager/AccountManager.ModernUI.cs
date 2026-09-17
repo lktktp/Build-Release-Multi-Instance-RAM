@@ -68,7 +68,10 @@ namespace RBX_Alt_Manager
                 if (DonateButton != null) DonateButton.Visible = false;
                 if (JoinDiscord != null) JoinDiscord.Visible = false;
                 if (HideUsernamesCheckbox != null) HideUsernamesCheckbox.Visible = false;
-                if (UserID != null) UserID.Visible = false;
+                // NOTE: UserID is intentionally NOT hidden here — it is the free-text
+                // "user to follow" field that Follow_Click reads (UserID.Text). It is
+                // reparented into the visible "Follow User" row in BuildRightDetailsPanel
+                // instead of being hidden, so the Follow feature keeps working.
                 if (Alias != null) Alias.Visible = false;
                 if (DescriptionBox != null) DescriptionBox.Visible = false;
                 if (SetDescription != null) SetDescription.Visible = false;
@@ -82,6 +85,12 @@ namespace RBX_Alt_Manager
 
                 // 3. CENTER CONTENT PANEL
                 BuildCenterContentPanel();
+
+                // CRITICAL WINFORMS Z-ORDER FIX:
+                // Left and Right must be at the BACK of the z-order so Center (DockStyle.Fill) calculates remaining space between them!
+                if (leftNavPanel != null) leftNavPanel.SendToBack();
+                if (rightDetailsPanel != null) rightDetailsPanel.SendToBack();
+                if (centerPanel != null) centerPanel.BringToFront();
 
                 this.ResumeLayout(true);
 
@@ -430,10 +439,40 @@ namespace RBX_Alt_Manager
             SetAlias.FlatStyle = FlatStyle.Flat;
             SetAlias.FlatAppearance.BorderSize = 0;
 
+            // 4b. Follow target input — restores the legacy "UserID" textbox
+            // (used by Follow_Click to know WHO to follow) which must stay
+            // reachable by the user, not just hidden.
+            Panel pnlFollowTarget = new Panel
+            {
+                Location = new Point(12, 258),
+                Size = new Size(300, 34),
+                BackColor = Color.Transparent
+            };
+
+            Label lblFollowTarget = new Label
+            {
+                Text = "Username / User ID สำหรับ Follow",
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Font = new Font("Segoe UI", 7.5f),
+                Location = new Point(0, 0),
+                AutoSize = true
+            };
+
+            UserID.Parent = pnlFollowTarget;
+            UserID.Location = new Point(0, 14);
+            UserID.Size = new Size(300, 20);
+            UserID.BackColor = Color.FromArgb(19, 27, 42);
+            UserID.ForeColor = Color.White;
+            UserID.BorderColor = Color.FromArgb(37, 99, 235);
+            UserID.Font = new Font("Segoe UI", 8.5f);
+
+            pnlFollowTarget.Controls.Add(lblFollowTarget);
+            pnlFollowTarget.Controls.Add(UserID);
+
             // 5. Account Information Section (ข้อมูลบัญชี)
             Panel pnlDetails = new Panel
             {
-                Location = new Point(12, 260),
+                Location = new Point(12, 300),
                 Size = new Size(300, 160),
                 BackColor = Color.FromArgb(19, 27, 42)
             };
@@ -457,14 +496,14 @@ namespace RBX_Alt_Manager
 
             // Detail rows
             rightValUsername = AddDetailRow(pnlDetails, "Username", "-", 38, true, () => Clipboard.SetText(rightValUsername.Text));
-            rightValAlias = AddDetailRow(pnlDetails, "Alias", "-", 66, false, () => SetAlias.PerformClick());
+            rightValAlias = AddEditableDetailRow(pnlDetails, "Alias", "-", 66, Alias, SetAlias);
             rightValUserId = AddDetailRow(pnlDetails, "User ID", "-", 94, true, () => Clipboard.SetText(rightValUserId.Text));
-            rightValDescription = AddDetailRow(pnlDetails, "Description", "-", 122, false, () => SetDescription.PerformClick());
+            rightValDescription = AddEditableDetailRow(pnlDetails, "Description", "-", 122, DescriptionBox, SetDescription);
 
             // 6. Advanced Settings Section (การตั้งค่าขั้นสูง)
             Panel pnlAdvSettings = new Panel
             {
-                Location = new Point(12, 430),
+                Location = new Point(12, 470),
                 Size = new Size(300, 115),
                 BackColor = Color.FromArgb(19, 27, 42)
             };
@@ -511,7 +550,7 @@ namespace RBX_Alt_Manager
             // 7. Status Bar Bottom Right
             statusBarLabel = new Label
             {
-                Location = new Point(12, 555),
+                Location = new Point(12, 595),
                 Size = new Size(300, 24),
                 Text = "⚡ พร้อมใช้งาน / 0 บัญชี",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
@@ -523,6 +562,7 @@ namespace RBX_Alt_Manager
             rightDetailsPanel.Controls.Add(pnlInputs);
             rightDetailsPanel.Controls.Add(JoinServer);
             rightDetailsPanel.Controls.Add(pnlQuickActions);
+            rightDetailsPanel.Controls.Add(pnlFollowTarget);
             rightDetailsPanel.Controls.Add(pnlDetails);
             rightDetailsPanel.Controls.Add(pnlAdvSettings);
             rightDetailsPanel.Controls.Add(statusBarLabel);
@@ -567,6 +607,108 @@ namespace RBX_Alt_Manager
 
             parent.Controls.Add(lblKey);
             parent.Controls.Add(lblVal);
+            parent.Controls.Add(btnAction);
+
+            return lblVal;
+        }
+
+        /// <summary>
+        /// A detail row whose pencil (✎) button turns the value into an inline,
+        /// editable TextBox instead of performing the legacy click directly.
+        /// This avoids the bug where the legacy Alias/DescriptionBox textboxes —
+        /// now hidden — would silently be committed with stale text. Enter or
+        /// losing focus commits (writes into the legacy control, then calls its
+        /// existing PerformClick(), leaving SetAlias_Click/SetDescription_Click
+        /// completely untouched); Escape cancels without saving.
+        /// </summary>
+        private Label AddEditableDetailRow(Panel parent, string label, string defaultValue, int y, Control legacyTarget, Button legacyCommitButton)
+        {
+            Label lblKey = new Label
+            {
+                Text = label,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(12, y),
+                AutoSize = true
+            };
+
+            Label lblVal = new Label
+            {
+                Text = defaultValue,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.White,
+                Location = new Point(110, y),
+                Size = new Size(150, 18),
+                AutoEllipsis = true
+            };
+
+            TextBox editBox = new TextBox
+            {
+                Font = new Font("Segoe UI", 8.5f),
+                Location = new Point(110, y - 2),
+                Size = new Size(150, 20),
+                BackColor = Color.FromArgb(11, 15, 25),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            bool suppressLeave = false;
+
+            void CommitEdit()
+            {
+                if (suppressLeave) return;
+                suppressLeave = true;
+
+                legacyTarget.Text = editBox.Text;
+                legacyCommitButton.PerformClick(); // runs the existing, unmodified SetAlias_Click / SetDescription_Click
+
+                lblVal.Text = string.IsNullOrEmpty(editBox.Text) ? "-" : editBox.Text;
+                editBox.Visible = false;
+                lblVal.Visible = true;
+
+                suppressLeave = false;
+            }
+
+            void CancelEdit()
+            {
+                suppressLeave = true;
+                editBox.Visible = false;
+                lblVal.Visible = true;
+                suppressLeave = false;
+            }
+
+            editBox.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; CommitEdit(); }
+                else if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; CancelEdit(); }
+            };
+            editBox.Leave += (s, e) => CommitEdit();
+
+            Button btnAction = new Button
+            {
+                Text = "✎",
+                Font = new Font("Segoe UI", 8f),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                BackColor = Color.Transparent,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(24, 20),
+                Location = new Point(266, y - 2),
+                Cursor = Cursors.Hand
+            };
+            btnAction.FlatAppearance.BorderSize = 0;
+            btnAction.Click += (s, e) =>
+            {
+                editBox.Text = lblVal.Text == "-" ? "" : lblVal.Text;
+                lblVal.Visible = false;
+                editBox.Visible = true;
+                editBox.Focus();
+                editBox.SelectAll();
+            };
+
+            parent.Controls.Add(lblKey);
+            parent.Controls.Add(lblVal);
+            parent.Controls.Add(editBox);
             parent.Controls.Add(btnAction);
 
             return lblVal;
@@ -677,9 +819,13 @@ namespace RBX_Alt_Manager
             Remove.Cursor = Cursors.Hand;
 
             // Button 3: Toggle Hide Usernames
+            // Delegates to the existing HideUsernamesCheckbox (kept, just invisible)
+            // instead of duplicating its logic, so HideUsernamesCheckbox_CheckedChanged
+            // (General.Set + legacy grid column width) stays the single source of truth.
+            bool hideUserInitial = HideUsernamesCheckbox != null && HideUsernamesCheckbox.Checked;
             btnToggleHideUser = new Button
             {
-                Text = "☑ ซ่อนชื่อผู้ใช้ 👁️",
+                Text = hideUserInitial ? "☒ แสดงชื่อผู้ใช้ 👁️" : "☑ ซ่อนชื่อผู้ใช้ 👁️",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 BackColor = Color.FromArgb(30, 41, 59),
                 ForeColor = Color.White,
@@ -691,12 +837,12 @@ namespace RBX_Alt_Manager
             btnToggleHideUser.FlatAppearance.BorderSize = 0;
             btnToggleHideUser.Click += (s, e) =>
             {
-                bool cur = General.Get<bool>("HideUsernames");
-                General.Set("HideUsernames", (!cur).ToString().ToLower());
+                HideUsernamesCheckbox.Checked = !HideUsernamesCheckbox.Checked;
                 IniSettings.Save("RAMSettings.ini");
-                btnToggleHideUser.Text = !cur ? "☒ แสดงชื่อผู้ใช้ 👁️" : "☑ ซ่อนชื่อผู้ใช้ 👁️";
+                btnToggleHideUser.Text = HideUsernamesCheckbox.Checked ? "☒ แสดงชื่อผู้ใช้ 👁️" : "☑ ซ่อนชื่อผู้ใช้ 👁️";
                 RefreshModernCards();
             };
+            btnToggleHideUser.Parent = pnlBottomBar;
 
             // Button 4: Open Browser
             OpenBrowser.Parent = pnlBottomBar;
@@ -711,6 +857,16 @@ namespace RBX_Alt_Manager
             OpenBrowser.Menu = OpenBrowserStrip;
             OpenBrowser.Cursor = Cursors.Hand;
 
+            Add.Visible = true;
+            Remove.Visible = true;
+            btnToggleHideUser.Visible = true;
+            OpenBrowser.Visible = true;
+
+            pnlBottomBar.Controls.Add(Add);
+            pnlBottomBar.Controls.Add(Remove);
+            pnlBottomBar.Controls.Add(btnToggleHideUser);
+            pnlBottomBar.Controls.Add(OpenBrowser);
+
             // 3. Middle Cards Container
             cardsContainer = new FlowLayoutPanel
             {
@@ -723,7 +879,7 @@ namespace RBX_Alt_Manager
             };
             cardsContainer.SizeChanged += (s, e) =>
             {
-                int newWidth = Math.Max(cardsContainer.ClientSize.Width - 24, 450);
+                int newWidth = Math.Max(cardsContainer.ClientSize.Width - 24, 420);
                 foreach (var card in modernCards)
                 {
                     card.Width = newWidth;
@@ -733,6 +889,10 @@ namespace RBX_Alt_Manager
             centerPanel.Controls.Add(cardsContainer);
             centerPanel.Controls.Add(pnlTopBar);
             centerPanel.Controls.Add(pnlBottomBar);
+
+            // Docking z-order inside centerPanel
+            pnlTopBar.SendToBack();
+            pnlBottomBar.SendToBack();
             cardsContainer.BringToFront();
 
             this.Controls.Add(centerPanel);
@@ -818,15 +978,28 @@ namespace RBX_Alt_Manager
 
                     card.PlayClicked += async (s, playAcc) =>
                     {
-                        long pId = 0;
-                        long.TryParse(PlaceID?.Text, out pId);
-                        string jId = JobID?.Text ?? "";
-                        bool vip = jId.Length > 4 && jId.Substring(0, 4) == "VIP:";
+                        // Loading state: block a second click on this card while the
+                        // join is in flight (ModernAccountCard.Enabled also suppresses
+                        // its mouse handling), then restore it regardless of outcome.
+                        ModernAccountCard sourceCard = s as ModernAccountCard;
+                        if (sourceCard != null) sourceCard.Enabled = false;
 
-                        Program.Logger.Info($"[Quick Launch] Launching single account: {playAcc.Username}");
-                        string res = await playAcc.JoinServer(pId, vip ? jId.Substring(4) : jId, false, vip);
-                        if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
-                            MessageBox.Show(res, "Launch Account", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        try
+                        {
+                            long pId = 0;
+                            long.TryParse(PlaceID?.Text, out pId);
+                            string jId = JobID?.Text ?? "";
+                            bool vip = jId.Length > 4 && jId.Substring(0, 4) == "VIP:";
+
+                            Program.Logger.Info($"[Quick Launch] Launching single account: {playAcc.Username}");
+                            string res = await playAcc.JoinServer(pId, vip ? jId.Substring(4) : jId, false, vip);
+                            if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
+                                MessageBox.Show(res, "Launch Account", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        finally
+                        {
+                            if (sourceCard != null && !sourceCard.IsDisposed) sourceCard.Enabled = true;
+                        }
                     };
 
                     card.CopyClicked += (s, copyAcc) =>
@@ -854,6 +1027,13 @@ namespace RBX_Alt_Manager
                 if (navBadgeLabel != null) navBadgeLabel.Text = AccountsList.Count.ToString();
                 if (statusBarLabel != null) statusBarLabel.Text = $"⚡ พร้อมใช้งาน / {AccountsList.Count} บัญชี";
 
+                // Drop a stale selection (e.g. the selected account was just removed)
+                if (SelectedAccount != null && !AccountsList.Contains(SelectedAccount))
+                {
+                    SelectedAccount = null;
+                    SelectedAccounts = new List<Account>();
+                }
+
                 // Auto-select first account if none selected
                 if (SelectedAccount == null && AccountsList.Count > 0)
                 {
@@ -866,6 +1046,26 @@ namespace RBX_Alt_Manager
                     UpdateRightPanelDetails(SelectedAccount);
                     UpdateCardsSelectionState();
                 }
+                else
+                {
+                    // No accounts at all — reset the right panel to its empty state.
+                    if (rightUsernameLabel != null) rightUsernameLabel.Text = "เลือกบัญชี...";
+                    if (rightAliasLabel != null) rightAliasLabel.Text = "Alias: - ✎";
+                    if (rightIdLabel != null) rightIdLabel.Text = "ID: -";
+                    if (rightValUsername != null) rightValUsername.Text = "-";
+                    if (rightValAlias != null) rightValAlias.Text = "-";
+                    if (rightValUserId != null) rightValUserId.Text = "-";
+                    if (rightValDescription != null) rightValDescription.Text = "-";
+                    if (rightAvatarBox != null) rightAvatarBox.Image = null;
+                }
+
+                // UX requirement: disable actions that need a selected account.
+                bool hasSelection = SelectedAccount != null;
+                JoinServer.Enabled = hasSelection;
+                Remove.Enabled = hasSelection;
+                ServerList.Enabled = hasSelection;
+                Follow.Enabled = hasSelection;
+                SetAlias.Enabled = hasSelection;
 
                 cardsContainer.ResumeLayout(true);
             });

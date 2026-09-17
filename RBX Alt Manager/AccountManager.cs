@@ -644,6 +644,8 @@ namespace RBX_Alt_Manager
 
         private void AccountManager_Load(object sender, EventArgs e)
         {
+            Text = "Multi-Roblox Manager [lktktp Edition] v4.0";
+            Font = new Font("Segoe UI", 9F);
             PasswordPanel.Dock = DockStyle.Fill;
 
             string AFN = Path.Combine(Directory.GetCurrentDirectory(), "Auto Update.exe");
@@ -665,15 +667,17 @@ namespace RBX_Alt_Manager
             ThemeForm = new ThemeEditor();
             RGForm = new RecentGamesForm();
 
-            MainClient = new RestClient("https://www.roblox.com/");
-            AvatarClient = new RestClient("https://avatar.roblox.com/");
-            AuthClient = new RestClient("https://auth.roblox.com/");
-            EconClient = new RestClient("https://economy.roblox.com/");
-            AccountClient = new RestClient("https://accountsettings.roblox.com/");
+            const string DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+            MainClient = new RestClient(new RestClientOptions("https://www.roblox.com/") { UserAgent = DefaultUserAgent });
+            AvatarClient = new RestClient(new RestClientOptions("https://avatar.roblox.com/") { UserAgent = DefaultUserAgent });
+            AuthClient = new RestClient(new RestClientOptions("https://auth.roblox.com/") { UserAgent = DefaultUserAgent });
+            EconClient = new RestClient(new RestClientOptions("https://economy.roblox.com/") { UserAgent = DefaultUserAgent });
+            AccountClient = new RestClient(new RestClientOptions("https://accountsettings.roblox.com/") { UserAgent = DefaultUserAgent });
             GameJoinClient = new RestClient(new RestClientOptions("https://gamejoin.roblox.com/") { UserAgent = "Roblox/WinInet" });
-            UsersClient = new RestClient("https://users.roblox.com");
-            FriendsClient = new RestClient("https://friends.roblox.com");
-            Web13Client = new RestClient("https://web.roblox.com/");
+            UsersClient = new RestClient(new RestClientOptions("https://users.roblox.com") { UserAgent = DefaultUserAgent });
+            FriendsClient = new RestClient(new RestClientOptions("https://friends.roblox.com") { UserAgent = DefaultUserAgent });
+            Web13Client = new RestClient(new RestClientOptions("https://web.roblox.com/") { UserAgent = DefaultUserAgent });
 
             if (File.Exists(SaveFilePath))
                 LoadAccounts();
@@ -714,7 +718,7 @@ namespace RBX_Alt_Manager
                         Assembly assembly = Assembly.GetExecutingAssembly();
                         FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(assembly.Location);
                         WC.Headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36";
-                        string Releases = WC.DownloadString("https://api.github.com/repos/DinoKob/Build-Release-Multi-Instance-RAM/releases/latest");
+                        string Releases = WC.DownloadString("https://api.github.com/repos/lktktp/Build-Release-Multi-Instance-RAM/releases/latest");
                         Match match = Regex.Match(Releases, @"""tag_name"":\s*""?([^""]+)");
 
                         if (match.Success)
@@ -733,7 +737,7 @@ namespace RBX_Alt_Manager
 
                                 if (ShouldUpdate)
                                 {
-                                    Process.Start("https://github.com/DinoKob/Build-Release-Multi-Instance-RAM/releases/latest");
+                                    Process.Start("https://github.com/lktktp/Build-Release-Multi-Instance-RAM/releases/latest");
                                 }
                             }
                         }
@@ -838,11 +842,36 @@ namespace RBX_Alt_Manager
 
             Controls.ApplyTheme();
 
-            // Re-apply special accent color for Join Server button
-            JoinServer.BackColor = Color.FromArgb(16, 185, 129);
+            // Distinct Modern Accent Colors for Key Buttons:
+            // 1. Join Server (Vibrant Blue accent with bold Segoe UI font)
+            JoinServer.BackColor = Color.FromArgb(37, 99, 235);
             JoinServer.ForeColor = Color.White;
             JoinServer.FlatStyle = FlatStyle.Flat;
             JoinServer.FlatAppearance.BorderSize = 0;
+            JoinServer.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+
+            // 2. Add Account (Clean Emerald Green)
+            Add.BackColor = Color.FromArgb(16, 185, 129);
+            Add.ForeColor = Color.White;
+            Add.FlatStyle = FlatStyle.Flat;
+            Add.FlatAppearance.BorderSize = 0;
+            Add.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+
+            // 3. Remove (Clean Crimson Red)
+            Remove.BackColor = Color.FromArgb(225, 29, 72);
+            Remove.ForeColor = Color.White;
+            Remove.FlatStyle = FlatStyle.Flat;
+            Remove.FlatAppearance.BorderSize = 0;
+            Remove.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+
+            // 4. Server List & Browser (Flat modern look)
+            ServerList.FlatStyle = FlatStyle.Flat;
+            ServerList.FlatAppearance.BorderSize = 1;
+            ServerList.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
+
+            OpenBrowser.FlatStyle = FlatStyle.Flat;
+            OpenBrowser.FlatAppearance.BorderSize = 1;
+            OpenBrowser.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
 
             afform.ApplyTheme();
             ServerListForm.ApplyTheme();
@@ -2159,13 +2188,13 @@ namespace RBX_Alt_Manager
         }
 
         private void infoToolStripMenuItem1_Click(object sender, EventArgs e) =>
-            MessageBox.Show("Dino Multi-Roblox Manager (Dino Edition v4.0)\nCreated by DinoKob\nMulti-Instance & Modern Roblox Launcher Fixed.", "Dino Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Multi-Roblox Account Manager (lktktp Edition v4.0)\nCreated by lktktp\nMulti-Instance & Modern Roblox Launcher Fixed.", "Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         private void groupsToolStripMenuItem_Click(object sender, EventArgs e) =>
-            MessageBox.Show("Groups can be sorted by naming them a number then whatever you want.\nFor example: You can put Group Apple on top by naming it '001 Apple' or '1Apple'.\nThe numbers will be hidden from the name but will be correctly sorted depending on the number.\nAccounts can also be dragged into groups.", "Dino Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Groups can be sorted by naming them a number then whatever you want.\nFor example: You can put Group Apple on top by naming it '001 Apple' or '1Apple'.\nThe numbers will be hidden from the name but will be correctly sorted depending on the number.\nAccounts can also be dragged into groups.", "Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         private void DonateButton_Click(object sender, EventArgs e) =>
-            Process.Start("https://github.com/DinoKob/Build-Release-Multi-Instance-RAM");
+            Process.Start("https://github.com/lktktp/Build-Release-Multi-Instance-RAM");
 
         private void ConfigButton_Click(object sender, EventArgs e)
         {

@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32;
+using System;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 using System.IO;
 
@@ -10,14 +11,41 @@ namespace RBX_Alt_Manager.Classes
         {
             DirectoryInfo VersionFolder = null;
 
-            object RegistryValue = Registry.ClassesRoot.OpenSubKey(@"roblox\DefaultIcon")?.GetValue("");
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\roblox-player\shell\open\command") ?? Registry.ClassesRoot.OpenSubKey(@"roblox-player\shell\open\command"))
+                {
+                    if (key != null && key.GetValue("") is string cmd && !string.IsNullOrEmpty(cmd))
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(cmd, "\"([^\"]+RobloxPlayerBeta\\.exe)\"");
+                        if (match.Success && File.Exists(match.Groups[1].Value))
+                        {
+                            VersionFolder = new DirectoryInfo(Path.GetDirectoryName(match.Groups[1].Value));
+                        }
+                    }
+                }
+            }
+            catch { }
 
-            if (RegistryValue != null && RegistryValue is string RobloxPath)
-                VersionFolder = Directory.GetParent(RobloxPath);
+            if (VersionFolder == null || !VersionFolder.Exists)
+            {
+                string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string versionsDir = Path.Combine(localApp, @"Roblox\Versions");
+                if (Directory.Exists(versionsDir))
+                {
+                    foreach (string dir in Directory.GetDirectories(versionsDir))
+                    {
+                        if (File.Exists(Path.Combine(dir, "RobloxPlayerBeta.exe")))
+                        {
+                            VersionFolder = new DirectoryInfo(dir);
+                            break;
+                        }
+                    }
+                }
+            }
 
-            if (VersionFolder == null || !VersionFolder.Exists) { Program.Logger.Error("Can't patch ClientAppSettings, folder doesn't exist"); return; }
-            if (!VersionFolder.Name.StartsWith("version-")) { Program.Logger.Error("Can't patch ClientAppSettings, folder doesn't start with 'version-'"); return; }
-            if (!File.Exists(Path.Combine(VersionFolder.FullName, "RobloxPlayerLauncher.exe"))) { Program.Logger.Error("Can't patch ClientAppSettings, RobloxPlayerBeta.exe not found"); return; }
+            if (VersionFolder == null || !VersionFolder.Exists) { Program.Logger.Warn("Can't patch ClientAppSettings, Roblox version folder not found"); return; }
+            if (!File.Exists(Path.Combine(VersionFolder.FullName, "RobloxPlayerBeta.exe"))) { Program.Logger.Warn("Can't patch ClientAppSettings, RobloxPlayerBeta.exe not found"); return; }
 
             DirectoryInfo SettingsFolder = new DirectoryInfo(Path.Combine(VersionFolder.FullName, "ClientSettings"));
 

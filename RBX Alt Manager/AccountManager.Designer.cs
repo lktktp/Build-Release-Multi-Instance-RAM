@@ -186,7 +186,7 @@ namespace RBX_Alt_Manager
             this.Remove.Name = "Remove";
             this.Remove.Size = new System.Drawing.Size(95, 23);
             this.Remove.TabIndex = 15;
-            this.Remove.Text = "Remove";
+            this.Remove.Text = "✕ Remove";
             this.Remove.UseVisualStyleBackColor = true;
             this.Remove.Click += new System.EventHandler(this.Remove_Click);
             // 
@@ -197,7 +197,7 @@ namespace RBX_Alt_Manager
             this.JoinServer.Name = "JoinServer";
             this.JoinServer.Size = new System.Drawing.Size(198, 30);
             this.JoinServer.TabIndex = 4;
-            this.JoinServer.Text = "Join Server";
+            this.JoinServer.Text = "▶  Join Server";
             this.JoinServer.UseVisualStyleBackColor = true;
             this.JoinServer.Click += new System.EventHandler(this.JoinServer_Click);
             // 
@@ -991,7 +991,7 @@ namespace RBX_Alt_Manager
             this.Add.Name = "Add";
             this.Add.Size = new System.Drawing.Size(95, 23);
             this.Add.TabIndex = 14;
-            this.Add.Text = "Add Account";
+            this.Add.Text = "+ Add Account";
             this.Add.UseVisualStyleBackColor = true;
             this.Add.Click += new System.EventHandler(this.Add_Click);
             // 
@@ -1092,7 +1092,7 @@ namespace RBX_Alt_Manager
             this.MaximizeBox = false;
             this.MinimumSize = new System.Drawing.Size(800, 340);
             this.Name = "AccountManager";
-            this.Text = "Roblox Account Manager";
+            this.Text = "Multi-Roblox Manager [lktktp Edition] v4.0";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.AccountManager_FormClosing);
             this.Load += new System.EventHandler(this.AccountManager_Load);
             this.Shown += new System.EventHandler(this.AccountManager_Shown);

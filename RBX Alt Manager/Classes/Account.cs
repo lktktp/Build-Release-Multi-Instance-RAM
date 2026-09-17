@@ -107,49 +107,71 @@ namespace RBX_Alt_Manager
             }
         }
 
-        public RestRequest MakeRequest(string url, Method method = Method.Get) => new RestRequest(url, method).AddCookie(".ROBLOSECURITY", SecurityToken, "/", ".roblox.com");
+        public RestRequest MakeRequest(string url, Method method = Method.Get)
+        {
+            var req = new RestRequest(url, method);
+            req.AddCookie(".ROBLOSECURITY", SecurityToken, "/", ".roblox.com");
+            if (!string.IsNullOrEmpty(SecurityToken))
+                req.AddHeader("Cookie", $".ROBLOSECURITY={SecurityToken}");
+            return req;
+        }
 
-        public bool GetAuthTicket(out string Ticket)
+        public bool GetAuthTicket(out string Ticket) => GetAuthTicket(out Ticket, out _);
+
+        public bool GetAuthTicket(out string Ticket, out string ErrorDetails)
         {
             Ticket = string.Empty;
+            ErrorDetails = string.Empty;
 
-            if (!GetCSRFToken(out string Token)) return false;
+            if (!GetCSRFToken(out string Token))
+            {
+                ErrorDetails = $"CSRF Token error: {Token}";
+                return false;
+            }
 
-            RestRequest request = MakeRequest("/v1/authentication-ticket/", Method.Post).AddHeader("X-CSRF-TOKEN", Token).AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP");
+            RestRequest request = MakeRequest("v1/authentication-ticket/", Method.Post)
+                .AddHeader("X-CSRF-TOKEN", Token)
+                .AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP")
+                .AddHeader("Origin", "https://www.roblox.com");
 
             RestResponse response = AccountManager.AuthClient.Execute(request);
 
-            Parameter TicketHeader = response.Headers.FirstOrDefault(x => x.Name == "rbx-authentication-ticket");
+            Parameter TicketHeader = response.Headers?.FirstOrDefault(x => string.Equals(x.Name, "rbx-authentication-ticket", StringComparison.OrdinalIgnoreCase));
 
-            if (TicketHeader != null)
+            if (TicketHeader != null && TicketHeader.Value != null)
             {
-                Ticket = (string)TicketHeader.Value;
-
+                Ticket = TicketHeader.Value.ToString();
                 return true;
             }
+
+            ErrorDetails = $"[{(int)response.StatusCode} {response.StatusCode}] {response.Content}".Trim();
+            Program.Logger.Error($"Failed to obtain auth ticket for {Username}: {ErrorDetails}");
 
             return false;
         }
 
         public bool GetCSRFToken(out string Result)
         {
-            RestRequest request = MakeRequest("v1/authentication-ticket/", Method.Post).AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP");
+            RestRequest request = MakeRequest("v1/authentication-ticket/", Method.Post)
+                .AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP")
+                .AddHeader("Origin", "https://www.roblox.com");
 
             RestResponse response = AccountManager.AuthClient.Execute(request);
 
             if (response.StatusCode != HttpStatusCode.Forbidden)
             {
                 Result = $"[{(int)response.StatusCode} {response.StatusCode}] {response.Content}";
+                Program.Logger.Warn($"Failed to get CSRF token for {Username}: {Result}");
                 return false;
             }
 
-            Parameter result = response.Headers.FirstOrDefault(x => x.Name == "x-csrf-token");
+            Parameter result = response.Headers?.FirstOrDefault(x => string.Equals(x.Name, "x-csrf-token", StringComparison.OrdinalIgnoreCase));
 
             string Token = string.Empty;
 
-            if (result != null)
+            if (result != null && result.Value != null)
             {
-                Token = (string)result.Value;
+                Token = result.Value.ToString();
                 LastUse = DateTime.Now;
 
                 AccountManager.LastValidAccount = this;
@@ -160,7 +182,13 @@ namespace RBX_Alt_Manager
             TokenSet = DateTime.Now;
             Result = Token;
 
-            return !string.IsNullOrEmpty(Result);
+            if (string.IsNullOrEmpty(Result))
+            {
+                Program.Logger.Warn($"Roblox returned 403 but no x-csrf-token header was found for {Username}. Content: {response.Content}");
+                return false;
+            }
+
+            return true;
         }
 
         public bool CheckPin(bool Internal = false)
@@ -519,7 +547,7 @@ namespace RBX_Alt_Manager
             if (AccountManager.ShuffleJobID && string.IsNullOrEmpty(JobID))
                 JobID = await Utilities.GetRandomJobId(PlaceID);
 
-            if (GetAuthTicket(out string Ticket))
+            if (GetAuthTicket(out string Ticket, out string AuthError))
             {
                 // Only close processes that belong to THIS account (matching BrowserTrackerID)
                 // This prevents killing other accounts' Roblox instances
@@ -705,7 +733,10 @@ namespace RBX_Alt_Manager
                 return "Success";
             }
             else
-                return "ERROR: Invalid Authentication Ticket, re-add the account or try again\n(Failed to get Authentication Ticket, Roblox has probably signed you out)";
+            {
+                string cleanError = string.IsNullOrWhiteSpace(AuthError) ? "Failed to get Authentication Ticket (Roblox has probably signed you out)" : AuthError;
+                return $"ERROR: Invalid Authentication Ticket, re-add the account or try again\n({cleanError})";
+            }
         }
 
         /// <summary>
@@ -715,7 +746,22 @@ namespace RBX_Alt_Manager
         {
             try
             {
-                // Check registry class for roblox-player protocol command
+                // Check HKCU first (user-level install, standard for modern Roblox)
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Classes\roblox-player\shell\open\command"))
+                {
+                    if (key != null)
+                    {
+                        string cmd = key.GetValue(null) as string;
+                        if (!string.IsNullOrEmpty(cmd))
+                        {
+                            var match = Regex.Match(cmd, "\"([^\"]+RobloxPlayerBeta\\.exe)\"");
+                            if (match.Success && File.Exists(match.Groups[1].Value))
+                                return match.Groups[1].Value;
+                        }
+                    }
+                }
+
+                // Check ClassesRoot
                 using (var key = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"roblox-player\shell\open\command"))
                 {
                     if (key != null)

@@ -1,0 +1,64 @@
+﻿name: Build & Release Multi-Instance RAM
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore NuGet Packages
+      run: nuget restore "RBX Alt Manager.sln"
+
+    - name: Build Solution (Release)
+      run: |
+        msbuild "RBX Alt Manager.sln" /p:Configuration=Release /p:Platform="Any CPU"
+
+    - name: Prepare Release Artifacts
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "dist"
+        Copy-Item -Path "build\Release\*" -Destination "dist" -Recurse
+        Compress-Archive -Path "dist\*" -DestinationPath "Roblox-Account-Manager-MultiInstance.zip" -Force
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Roblox-Account-Manager-MultiInstance
+        path: Roblox-Account-Manager-MultiInstance.zip
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: Roblox-Account-Manager-MultiInstance.zip
+        name: Roblox Account Manager (Multi-Instance Fixed) ${{ github.ref_name }}
+        tag_name: ${{ github.ref_name || 'v3.7.2-multi' }}
+        body: |
+          ### Roblox Account Manager (Multi-Instance Fix)
+          
+          เวอร์ชันแก้ไขปัญหาเปิดหลายจอ/หลายไอดี:
+          - Direct EXE Launch เพื่อไม่ให้ Roblox Launcher ปิด instance ก่อนหน้า
+          - Unique BrowserTrackerID สำหรับแต่ละไอดี
+          - เปิดการใช้งาน Multi-Roblox Singleton Mutex เป็นค่าเริ่มต้น
+          - เพิ่ม Delay และ Smart Wait ป้องกันการแย่งทรัพยากรระหว่างเปิดเกม
+          
+          **วิธีใช้งาน:**
+          ดาวน์โหลด Roblox-Account-Manager-MultiInstance.zip ด้านล่าง แตกไฟล์แล้วเปิด Roblox Account Manager.exe ได้ทันที

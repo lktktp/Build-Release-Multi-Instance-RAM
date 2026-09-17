@@ -132,7 +132,8 @@ namespace RBX_Alt_Manager
             RestRequest request = MakeRequest("v1/authentication-ticket/", Method.Post)
                 .AddHeader("X-CSRF-TOKEN", Token)
                 .AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP")
-                .AddHeader("Origin", "https://www.roblox.com");
+                .AddHeader("Origin", "https://www.roblox.com")
+                .AddStringBody("{}", ContentType.Json);
 
             RestResponse response = AccountManager.AuthClient.Execute(request);
 
@@ -154,7 +155,8 @@ namespace RBX_Alt_Manager
         {
             RestRequest request = MakeRequest("v1/authentication-ticket/", Method.Post)
                 .AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP")
-                .AddHeader("Origin", "https://www.roblox.com");
+                .AddHeader("Origin", "https://www.roblox.com")
+                .AddStringBody("{}", ContentType.Json);
 
             RestResponse response = AccountManager.AuthClient.Execute(request);
 

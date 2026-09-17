@@ -230,6 +230,8 @@ namespace RBX_Alt_Manager
 
                     Prompts.Set("VCPrompted", "1");
                 });
+
+            SetupModernDashboardLayout();
         }
 
         private void Sink_CanDrop(object sender, OlvDropEventArgs e)
@@ -266,6 +268,8 @@ namespace RBX_Alt_Manager
                     AccountsView.RefreshObject(obj);
                     AccountsView.EnsureModelVisible(obj);
                 }
+
+                RefreshModernCards();
             });
         }
 
@@ -2374,7 +2378,16 @@ namespace RBX_Alt_Manager
                     VisibleAccounts.Add(account);
             }
 
-            try { await Presence.UpdatePresence(VisibleAccounts.Select(account => account.UserID).ToArray()); } catch { }
+            try
+            {
+                long[] userIds = (AccountsList != null && AccountsList.Count > 0)
+                    ? AccountsList.Select(a => a.UserID).ToArray()
+                    : VisibleAccounts.Select(account => account.UserID).ToArray();
+
+                await Presence.UpdatePresence(userIds);
+                RefreshModernCards();
+            }
+            catch { }
         }
 
         private void JobID_Click( object sender, EventArgs e )

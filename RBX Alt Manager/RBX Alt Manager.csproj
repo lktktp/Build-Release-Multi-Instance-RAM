@@ -409,6 +409,9 @@
       <DependentUpon>GameControl.cs</DependentUpon>
     </Compile>
     <Compile Include="Classes\Presence.cs" />
+    <Compile Include="Classes\ModernAccountCard.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Classes\RobloxProcess.cs" />
     <Compile Include="Classes\RobloxWatcher.cs" />
     <Compile Include="Classes\Utilities.cs" />
@@ -469,6 +472,10 @@
     </Compile>
     <Compile Include="AccountManager.Designer.cs">
       <DependentUpon>AccountManager.cs</DependentUpon>
+    </Compile>
+    <Compile Include="AccountManager.ModernUI.cs">
+      <DependentUpon>AccountManager.cs</DependentUpon>
+      <SubType>Form</SubType>
     </Compile>
     <Compile Include="Forms\AccountUtils.cs">
       <SubType>Form</SubType>

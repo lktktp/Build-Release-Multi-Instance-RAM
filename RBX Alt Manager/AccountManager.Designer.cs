@@ -1,4 +1,4 @@
-﻿using RBX_Alt_Manager.Classes;
+using RBX_Alt_Manager.Classes;
 
 namespace RBX_Alt_Manager
 {
@@ -195,7 +195,7 @@ namespace RBX_Alt_Manager
             this.JoinServer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.JoinServer.Location = new System.Drawing.Point(503, 67);
             this.JoinServer.Name = "JoinServer";
-            this.JoinServer.Size = new System.Drawing.Size(198, 23);
+            this.JoinServer.Size = new System.Drawing.Size(198, 30);
             this.JoinServer.TabIndex = 4;
             this.JoinServer.Text = "Join Server";
             this.JoinServer.UseVisualStyleBackColor = true;

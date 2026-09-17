@@ -167,7 +167,16 @@ namespace RBX_Alt_Manager
             if (!AccountControl.Exists("NexusPort")) AccountControl.Set("NexusPort", "5242");
 
             InitializeComponent();
+            this.Text = "Dino Multi-Roblox Manager (Dino Edition v4.0)";
+            this.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
             this.Rescale();
+
+            // Custom accent color for Join Server button
+            JoinServer.BackColor = Color.FromArgb(16, 185, 129); // Vibrant Emerald Green
+            JoinServer.ForeColor = Color.White;
+            JoinServer.FlatStyle = FlatStyle.Flat;
+            JoinServer.FlatAppearance.BorderSize = 0;
+            JoinServer.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
 
             AccountsList = new List<Account>();
             SelectedAccounts = new List<Account>();
@@ -176,8 +185,8 @@ namespace RBX_Alt_Manager
 
             if (ThemeEditor.UseDarkTopBar) Icon = Properties.Resources.team_KX4_icon_white; // this has to go after or icon wont actually change
 
-            AccountsView.UnfocusedHighlightBackgroundColor = Color.FromArgb(0, 150, 215);
-            AccountsView.UnfocusedHighlightForegroundColor = Color.FromArgb(240, 240, 240);
+            AccountsView.UnfocusedHighlightBackgroundColor = Color.FromArgb(79, 70, 229);
+            AccountsView.UnfocusedHighlightForegroundColor = Color.White;
 
             SimpleDropSink sink = AccountsView.DropSink as SimpleDropSink;
             sink.CanDropBetween = true;
@@ -828,6 +837,12 @@ namespace RBX_Alt_Manager
             AccountsView.CellEditActivation = ObjectListView.CellEditActivateMode.DoubleClick;
 
             Controls.ApplyTheme();
+
+            // Re-apply special accent color for Join Server button
+            JoinServer.BackColor = Color.FromArgb(16, 185, 129);
+            JoinServer.ForeColor = Color.White;
+            JoinServer.FlatStyle = FlatStyle.Flat;
+            JoinServer.FlatAppearance.BorderSize = 0;
 
             afform.ApplyTheme();
             ServerListForm.ApplyTheme();
@@ -2144,13 +2159,13 @@ namespace RBX_Alt_Manager
         }
 
         private void infoToolStripMenuItem1_Click(object sender, EventArgs e) =>
-            MessageBox.Show("Roblox Account Manager created by ic3w0lf under the GNU GPLv3 license.", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Dino Multi-Roblox Manager (Dino Edition v4.0)\nCreated by DinoKob\nMulti-Instance & Modern Roblox Launcher Fixed.", "Dino Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         private void groupsToolStripMenuItem_Click(object sender, EventArgs e) =>
-            MessageBox.Show("Groups can be sorted by naming them a number then whatever you want.\nFor example: You can put Group Apple on top by naming it '001 Apple' or '1Apple'.\nThe numbers will be hidden from the name but will be correctly sorted depending on the number.\nAccounts can also be dragged into groups.", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Groups can be sorted by naming them a number then whatever you want.\nFor example: You can put Group Apple on top by naming it '001 Apple' or '1Apple'.\nThe numbers will be hidden from the name but will be correctly sorted depending on the number.\nAccounts can also be dragged into groups.", "Dino Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         private void DonateButton_Click(object sender, EventArgs e) =>
-            Process.Start("https://ic3w0lf22.github.io/donate.html");
+            Process.Start("https://github.com/DinoKob/Build-Release-Multi-Instance-RAM");
 
         private void ConfigButton_Click(object sender, EventArgs e)
         {

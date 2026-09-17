@@ -45,7 +45,10 @@ jobs:
         path: Roblox-Account-Manager-MultiInstance.zip
 
     - name: Create GitHub Release
+      continue-on-error: true
       uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: Roblox-Account-Manager-MultiInstance.zip
         name: Roblox Account Manager (Multi-Instance Fixed)

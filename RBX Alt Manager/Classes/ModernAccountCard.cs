@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -38,13 +38,31 @@ namespace RBX_Alt_Manager.Classes
         public static readonly Dictionary<long, Image> AvatarCache = new Dictionary<long, Image>();
 
         public Account Account { get; private set; }
-        public bool IsSelected { get; set; }
         public bool HideUsername { get; set; }
+
+        // Selection state — synced with chkSelect CheckBox
+        private bool _isSelected = false;
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                _isSelected = value;
+                if (chkSelect != null && chkSelect.Checked != value)
+                    chkSelect.Checked = value;
+                this.Invalidate();
+            }
+        }
 
         public event EventHandler<Account> CardClicked;
         public event EventHandler<Account> PlayClicked;
         public event EventHandler<Account> CopyClicked;
         public event EventHandler<Point> MoreClicked;
+        /// <summary>Fires when the checkbox changes state. bool = isChecked</summary>
+        public event EventHandler<bool> SelectionToggled;
+
+        // Visible CheckBox for multi-account selection
+        public CheckBox chkSelect;
 
         private bool isHovered = false;
         private bool isPlayHovered = false;
@@ -75,9 +93,44 @@ namespace RBX_Alt_Manager.Classes
             this.TabStop = true;
             this.AccessibleRole = System.Windows.Forms.AccessibleRole.ListItem;
 
+            // Selection CheckBox — top-left corner, transparent background
+            chkSelect = new CheckBox
+            {
+                Size = new Size(20, 20),
+                Location = new Point(8, 30),
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            chkSelect.CheckedChanged += (s, e) =>
+            {
+                _isSelected = chkSelect.Checked;
+                this.Invalidate();
+                SelectionToggled?.Invoke(this, chkSelect.Checked);
+            };
+            this.Controls.Add(chkSelect);
+
             UpdateAccessibleName();
             LoadAvatarAsync();
         }
+
+        /// <summary>
+        /// Call this to repaint the card when the account's online/offline presence changes.
+        /// Safe to call from a background thread — marshals to UI thread automatically.
+        /// </summary>
+        public void RefreshPresenceDisplay()
+        {
+            if (IsDisposed) return;
+            try
+            {
+                if (this.InvokeRequired)
+                    this.BeginInvoke((MethodInvoker)(() => { if (!IsDisposed) this.Invalidate(); }));
+                else
+                    this.Invalidate();
+            }
+            catch { }
+        }
+
 
         private void UpdateAccessibleName()
         {

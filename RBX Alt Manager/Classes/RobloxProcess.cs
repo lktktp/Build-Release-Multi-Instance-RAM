@@ -97,11 +97,73 @@ namespace RBX_Alt_Manager.Classes
 
                     LogStream?.Dispose();
                     WaitForExitTimer?.Dispose();
+
+                    // Real-time Online/Offline update:
+                    // Find the account that owned this Roblox process by BrowserTrackerID
+                    // and immediately set its presence to Offline so the card updates.
+                    try
+                    {
+                        string cmdLine = string.Empty;
+                        try { cmdLine = RbxProcess.GetCommandLine(); } catch { }
+
+                        if (!string.IsNullOrEmpty(cmdLine))
+                        {
+                            var trackerMatch = System.Text.RegularExpressions.Regex.Match(cmdLine, @"\-b (\d+)");
+                            string trackerId = trackerMatch.Success ? trackerMatch.Groups[1].Value : string.Empty;
+
+                            if (!string.IsNullOrEmpty(trackerId))
+                            {
+                                Account matchedAccount = null;
+                                foreach (var acc in AccountManager.AccountsList)
+                                {
+                                    if (acc.BrowserTrackerID == trackerId)
+                                    {
+                                        matchedAccount = acc;
+                                        break;
+                                    }
+                                }
+
+                                if (matchedAccount != null)
+                                {
+                                    matchedAccount.Presence = new UserPresence { userPresenceType = UserPresenceType.Offline };
+                                    Program.Logger.Info($"[Presence] Set {matchedAccount.Username} to Offline (PID {RbxProcess.Id} exited)");
+
+                                    // Refresh matching card on UI thread
+                                    AccountManager.Instance?.InvokeIfRequired(() =>
+                                    {
+                                        foreach (var card in AccountManager.Instance.modernCards)
+                                        {
+                                            if (card.Account == matchedAccount)
+                                            {
+                                                card.RefreshPresenceDisplay();
+                                                break;
+                                            }
+                                        }
+                                        // Also refresh right panel if this is the selected account
+                                        if (AccountManager.SelectedAccount == matchedAccount)
+                                            AccountManager.Instance.UpdateRightPanelDetails(matchedAccount);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception presEx)
+                    {
+                        Program.Logger.Warn($"[Presence] Failed to update offline state: {presEx.Message}");
+                    }
+
+                    // Re-check mutex health: if all Roblox instances are closed, re-acquire mutex
+                    // so the next Join launch works correctly without needing an app restart.
+                    if (Process.GetProcessesByName("RobloxPlayerBeta").Length == 0)
+                    {
+                        AccountManager.Instance?.EnsureMultiMutexHealthy();
+                    }
                 }
                 catch (Exception x) { Program.Logger.Error($"WaitForExit Error: {x}"); }
             };
             WaitForExitTimer.Start();
         }
+
 
         private void ReadLogFile(object s, EventArgs e)
         {

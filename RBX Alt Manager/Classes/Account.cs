@@ -696,33 +696,43 @@ namespace RBX_Alt_Manager
                             Program.Logger.Info($"Started Roblox protocol URI for {Username}");
                         }
 
-                        // Notify launcher immediately so next account can launch without waiting 20s
-                        AccountManager.Instance.NextAccount();
 
-                        // Wait for Roblox window to appear and adjust position asynchronously in background
+                        // Wait for Roblox window to appear BEFORE signaling next account.
+                        // Calling NextAccount() immediately after Process.Start causes Byfron
+                        // (Roblox Hyperion anti-cheat) to silently kill the 2nd instance because
+                        // the first hasn't fully initialized yet.
                         if (RbxProcess != null)
                         {
-                            _ = Task.Run(async () =>
+                            DateTime winTimeout = DateTime.Now.AddSeconds(30);
+                            while (DateTime.Now < winTimeout)
                             {
-                                DateTime timeout = DateTime.Now.AddSeconds(20);
-                                while (DateTime.Now < timeout)
+                                try
                                 {
-                                    try
+                                    RbxProcess.Refresh();
+                                    if (RbxProcess.HasExited) break;
+                                    if (RbxProcess.MainWindowHandle != IntPtr.Zero)
                                     {
-                                        RbxProcess.Refresh();
-                                        if (RbxProcess.HasExited) break;
-                                        if (RbxProcess.MainWindowHandle != IntPtr.Zero)
-                                        {
-                                            Program.Logger.Info($"Roblox window opened for {Username} (PID: {RbxProcess.Id})");
-                                            AdjustWindowPosition();
-                                            break;
-                                        }
+                                        Program.Logger.Info($"Roblox window opened for {Username} (PID: {RbxProcess.Id})");
+                                        _ = Task.Run(AdjustWindowPosition);
+                                        break;
                                     }
-                                    catch { break; }
-                                    await Task.Delay(500);
                                 }
-                            });
+                                catch { break; }
+                                await Task.Delay(350);
+                            }
                         }
+                        else
+                        {
+                            // ShellExecute fallback: no process handle, wait a fixed time
+                            await Task.Delay(4000);
+                        }
+
+                        // Give Byfron 2 extra seconds to fully initialize before launching next account
+                        await Task.Delay(2000);
+
+                        // Signal launcher: this account has started, safe to proceed to next
+                        AccountManager.Instance.NextAccount();
+
                     }
                     catch (Exception x)
                     {

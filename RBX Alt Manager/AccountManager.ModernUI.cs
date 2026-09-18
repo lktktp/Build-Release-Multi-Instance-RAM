@@ -34,7 +34,7 @@ namespace RBX_Alt_Manager
         private Label rightValDescription;
         private Label statusBarLabel;
 
-        private List<ModernAccountCard> modernCards = new List<ModernAccountCard>();
+        internal List<ModernAccountCard> modernCards = new List<ModernAccountCard>();
 
         public void SetupModernDashboardLayout()
         {
@@ -761,13 +761,13 @@ namespace RBX_Alt_Manager
                 Text = "เรียงตาม",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(360, 10),
+                Location = new Point(420, 10),
                 AutoSize = true
             };
 
             sortComboBox = new ComboBox
             {
-                Location = new Point(415, 7),
+                Location = new Point(475, 7),
                 Size = new Size(150, 26),
                 BackColor = Color.FromArgb(19, 27, 42),
                 ForeColor = Color.White,
@@ -779,10 +779,39 @@ namespace RBX_Alt_Manager
             sortComboBox.SelectedIndex = 0;
             sortComboBox.SelectedIndexChanged += (s, e) => RefreshModernCards();
 
+            // "Select All" checkbox
+            CheckBox chkSelectAll = new CheckBox
+            {
+                Text = "☑ เลือกทั้งหมด",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(350, 11),
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            chkSelectAll.CheckedChanged += (s, e) =>
+            {
+                if (chkSelectAll.Checked)
+                {
+                    SelectedAccounts = new List<Account>(AccountsList);
+                    if (AccountsList.Count > 0) SelectedAccount = AccountsList[0];
+                }
+                else
+                {
+                    SelectedAccounts = new List<Account>();
+                }
+                try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                UpdateCardsSelectionState();
+                if (SelectedAccount != null) UpdateRightPanelDetails(SelectedAccount);
+            };
+
             pnlTopBar.Controls.Add(lblSearchPlaceholder);
             pnlTopBar.Controls.Add(searchTextBox);
+            pnlTopBar.Controls.Add(chkSelectAll);
             pnlTopBar.Controls.Add(lblSort);
             pnlTopBar.Controls.Add(sortComboBox);
+
 
             // 2. Bottom Action Bar (4 Buttons)
             Panel pnlBottomBar = new Panel
@@ -951,17 +980,40 @@ namespace RBX_Alt_Manager
                         IsSelected = (SelectedAccount == acc || (SelectedAccounts != null && SelectedAccounts.Contains(acc)))
                     };
 
+
+                    // Wire SelectionToggled (CheckBox on card) → maintain SelectedAccounts
+                    card.SelectionToggled += (s, isChecked) =>
+                    {
+                        if (SelectedAccounts == null) SelectedAccounts = new List<Account>();
+                        if (isChecked)
+                        {
+                            if (!SelectedAccounts.Contains(acc)) SelectedAccounts.Add(acc);
+                            SelectedAccount = acc;
+                        }
+                        else
+                        {
+                            SelectedAccounts.Remove(acc);
+                            if (SelectedAccount == acc)
+                                SelectedAccount = SelectedAccounts.Count > 0 ? SelectedAccounts[SelectedAccounts.Count - 1] : null;
+                        }
+                        try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                        if (SelectedAccount != null) UpdateRightPanelDetails(SelectedAccount);
+                        UpdateCardsSelectionState();
+                    };
+
                     card.CardClicked += (s, clickedAcc) =>
                     {
                         bool isCtrl = (ModifierKeys & Keys.Control) == Keys.Control;
-                        bool isShift = (ModifierKeys & Keys.Shift) == Keys.Shift;
 
-                        if (isCtrl && SelectedAccounts != null)
+                        if (SelectedAccounts == null) SelectedAccounts = new List<Account>();
+
+                        if (isCtrl)
                         {
                             if (SelectedAccounts.Contains(clickedAcc))
                                 SelectedAccounts.Remove(clickedAcc);
                             else
                                 SelectedAccounts.Add(clickedAcc);
+                            SelectedAccount = clickedAcc;
                         }
                         else
                         {
@@ -975,6 +1027,7 @@ namespace RBX_Alt_Manager
                         UpdateRightPanelDetails(clickedAcc);
                         UpdateCardsSelectionState();
                     };
+
 
                     card.PlayClicked += async (s, playAcc) =>
                     {
@@ -1075,8 +1128,25 @@ namespace RBX_Alt_Manager
         {
             foreach (var card in modernCards)
             {
-                card.IsSelected = (SelectedAccount == card.Account || (SelectedAccounts != null && SelectedAccounts.Contains(card.Account)));
-                card.Invalidate();
+                bool isSel = (SelectedAccount == card.Account || (SelectedAccounts != null && SelectedAccounts.Contains(card.Account)));
+                card.IsSelected = isSel;
+            }
+            UpdateJoinButtonText();
+        }
+
+        private void UpdateJoinButtonText()
+        {
+            if (JoinServer == null) return;
+            int count = SelectedAccounts != null ? SelectedAccounts.Count : 0;
+            if (count > 1)
+            {
+                JoinServer.Text = $"▶  Join Server ({count} บัญชี)  🔗";
+                JoinServer.BackColor = Color.FromArgb(16, 185, 129); // Emerald Green for multi-launch
+            }
+            else
+            {
+                JoinServer.Text = "▶   Join Server   🔗";
+                JoinServer.BackColor = Color.FromArgb(37, 99, 235); // Default blue
             }
         }
 

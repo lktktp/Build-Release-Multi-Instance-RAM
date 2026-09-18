@@ -1305,7 +1305,7 @@ namespace RBX_Alt_Manager
                         {
                             Program.Logger.Info($"[Auto-Clean] Closing background Roblox process {proc.ProcessName} (PID: {proc.Id}) so Multi-Roblox starts cleanly.");
                             proc.Kill();
-                            proc.WaitForExit(1000);
+                            proc.WaitForExit(3000); // wait up to 3s for it to actually exit
                         }
                         catch (Exception ex)
                         {
@@ -1314,6 +1314,84 @@ namespace RBX_Alt_Manager
                     }
                 }
                 catch { }
+            }
+
+            // Verify all processes are actually gone (retry force kill if needed)
+            int retryMs = 0;
+            while (retryMs < 4000)
+            {
+                bool anyLeft = false;
+                foreach (string name in rbxProcessNames)
+                {
+                    try
+                    {
+                        var remaining = Process.GetProcessesByName(name);
+                        if (remaining.Length > 0)
+                        {
+                            anyLeft = true;
+                            foreach (var p in remaining)
+                            {
+                                try { p.Kill(); p.WaitForExit(1000); } catch { }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                if (!anyLeft) break;
+                System.Threading.Thread.Sleep(500);
+                retryMs += 500;
+            }
+        }
+
+        /// <summary>
+        /// Ensures the ROBLOX_singletonMutex is held before launching accounts.
+        /// If all Roblox windows were closed, the mutex may have been abandoned.
+        /// This re-acquires it so Multi-Roblox works even after reopening the app
+        /// or closing all Roblox windows and relaunching.
+        /// </summary>
+        public void EnsureMultiMutexHealthy()
+        {
+            if (!General.Get<bool>("EnableMultiRbx")) return;
+
+            bool hasRoblox = Process.GetProcessesByName("RobloxPlayerBeta").Length > 0;
+
+            // If no Roblox running, the old mutex may be abandoned/released — recreate it
+            if (!hasRoblox && rbxMultiMutex != null)
+            {
+                try { rbxMultiMutex.ReleaseMutex(); } catch { }
+                try { rbxMultiMutex.Close(); } catch { }
+                rbxMultiMutex = null;
+                Program.Logger.Info("[Mutex] Released stale ROBLOX_singletonMutex (no Roblox running)");
+            }
+
+            if (rbxMultiMutex == null)
+            {
+                try
+                {
+                    rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool created);
+                    if (!created)
+                    {
+                        // Mutex exists but held by someone else — kill remaining Roblox processes and retry
+                        Program.Logger.Warn("[Mutex] ROBLOX_singletonMutex held by another process, clearing...");
+                        KillExistingRobloxProcesses();
+                        System.Threading.Thread.Sleep(500);
+                        try { rbxMultiMutex.Close(); } catch { }
+                        rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool created2);
+                        Program.Logger.Info($"[Mutex] ROBLOX_singletonMutex re-created (owned={created2})");
+                    }
+                    else
+                    {
+                        Program.Logger.Info("[Mutex] ROBLOX_singletonMutex acquired successfully");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Program.Logger.Error($"[Mutex] Failed to ensure mutex: {ex.Message}");
+                }
+            }
+            else
+            {
+                Program.Logger.Info("[Mutex] ROBLOX_singletonMutex already held — OK");
             }
         }
 
@@ -1645,18 +1723,29 @@ namespace RBX_Alt_Manager
 
             CancelLaunching();
 
-            bool LaunchMultiple = AccountsView.SelectedObjects.Count > 1;
+            // FIX: AccountsView is hidden behind modern card UI — its SelectedObjects is always empty.
+            // Read SelectedAccounts (maintained by card checkboxes / Ctrl+Click) directly.
+            List<Account> accountsToLaunch = (SelectedAccounts != null && SelectedAccounts.Count > 1)
+                ? new List<Account>(SelectedAccounts)
+                : (AccountsView.SelectedObjects != null && AccountsView.SelectedObjects.Count > 1
+                    ? AccountsView.SelectedObjects.Cast<Account>().ToList()
+                    : null);
+
+            bool LaunchMultiple = accountsToLaunch != null && accountsToLaunch.Count > 1;
 
             new Thread(async () => // finally fixing an ancient bug in a dumb way, p.s. i do not condone this.
             {
                 if (LaunchMultiple)
                 {
                     LauncherToken = new CancellationTokenSource();
+                    EnsureMultiMutexHealthy();
 
-                    await LaunchAccounts(SelectedAccounts, PlaceId, VIPServer ? JobID.Text.Substring(4) : JobID.Text, false, VIPServer);
+                    await LaunchAccounts(accountsToLaunch, PlaceId, VIPServer ? JobID.Text.Substring(4) : JobID.Text, false, VIPServer);
                 }
                 else if (SelectedAccount != null)
                 {
+                    EnsureMultiMutexHealthy();
+
                     string res = await SelectedAccount.JoinServer(PlaceId, VIPServer ? JobID.Text.Substring(4) : JobID.Text, false, VIPServer);
 
                     if (!res.Contains("Success"))
@@ -1678,14 +1767,24 @@ namespace RBX_Alt_Manager
 
             CancelLaunching();
 
-            if (AccountsView.SelectedObjects.Count > 1)
+            // FIX: Same as JoinServer_Click — read SelectedAccounts directly
+            List<Account> accountsToFollow = (SelectedAccounts != null && SelectedAccounts.Count > 1)
+                ? new List<Account>(SelectedAccounts)
+                : (AccountsView.SelectedObjects != null && AccountsView.SelectedObjects.Count > 1
+                    ? AccountsView.SelectedObjects.Cast<Account>().ToList()
+                    : null);
+
+            if (accountsToFollow != null && accountsToFollow.Count > 1)
             {
                 LauncherToken = new CancellationTokenSource();
+                EnsureMultiMutexHealthy();
 
-                await LaunchAccounts(SelectedAccounts, UserId, "", true);
+                await LaunchAccounts(accountsToFollow, UserId, "", true);
             }
             else if (SelectedAccount != null)
             {
+                EnsureMultiMutexHealthy();
+
                 string res = await SelectedAccount.JoinServer(UserId, "", true);
 
                 if (!res.Contains("Success"))
@@ -2161,7 +2260,7 @@ namespace RBX_Alt_Manager
 
         private async Task LaunchAccounts(List<Account> Accounts, long PlaceID, string JobID, bool FollowUser = false, bool VIPServer = false)
         {
-            int Delay = General.Exists("AccountJoinDelay") ? General.Get<int>("AccountJoinDelay") : 2;
+            int Delay = General.Exists("AccountJoinDelay") ? General.Get<int>("AccountJoinDelay") : 3;
 
             bool AsyncJoin = General.Get<bool>("AsyncJoin");
             CancellationTokenSource Token = LauncherToken;
@@ -2171,71 +2270,21 @@ namespace RBX_Alt_Manager
 
             int launchedCount = 0;
 
-            if (AsyncJoin)
-            {
-                // =========================================================
-                // PARALLEL / CONCURRENT LAUNCH ("เปิดพร้อมกัน")
-                // Launch all selected accounts concurrently with a smooth
-                // 1-second micro-stagger so Windows and Roblox don't collide
-                // =========================================================
-                Program.Logger.Info($"[Parallel Launch] Starting parallel launch for {Accounts.Count} accounts with 1s micro-stagger...");
+            Program.Logger.Info($"[Multi-Launch] Starting launch for {Accounts.Count} accounts (AsyncJoin={AsyncJoin}, Delay={Delay}s)...");
 
-                var launchTasks = new List<Task>();
-
-                for (int i = 0; i < Accounts.Count; i++)
-                {
-                    if (Token.IsCancellationRequested) break;
-
-                    Account account = Accounts[i];
-                    long PlaceId = PlaceID;
-                    string JobId = JobID;
-
-                    if (!FollowUser)
-                    {
-                        if (!string.IsNullOrEmpty(account.GetField("SavedPlaceId")) && long.TryParse(account.GetField("SavedPlaceId"), out long PID)) PlaceId = PID;
-                        if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
-                    }
-
-                    int index = i;
-                    launchTasks.Add(Task.Run(async () =>
-                    {
-                        try
-                        {
-                            if (index > 0)
-                            {
-                                await Task.Delay(index * 1000, Token.Token);
-                            }
-
-                            if (!Token.IsCancellationRequested)
-                            {
-                                Program.Logger.Info($"[Parallel Launch] Launching account {index + 1}/{Accounts.Count}: {account.Username}");
-                                string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
-                                if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
-                                {
-                                    Program.Logger.Error($"[Parallel Launch] Failed to launch {account.Username}: {res}");
-                                }
-                            }
-                        }
-                        catch (TaskCanceledException) { }
-                        catch (Exception ex)
-                        {
-                            Program.Logger.Error($"[Parallel Launch] Error launching {account.Username}: {ex.Message}");
-                        }
-                    }));
-                }
-
-                await Task.WhenAll(launchTasks);
-                Program.Logger.Info($"[Parallel Launch] Finished launching {Accounts.Count} accounts in parallel!");
-
-                Token.Cancel();
-                Token.Dispose();
-                return;
-            }
-
-            // =========================================================
-            // FAST SEQUENTIAL LAUNCH FALLBACK ("เปิดต่อไวๆ")
-            // Launches account 1, waits minimal delay (default 2s), then account 2
-            // =========================================================
+            // =====================================================================
+            // WINDOW-STABILIZED SEQUENTIAL LAUNCH (Byfron-safe)
+            //
+            // Byfron (Roblox Hyperion anti-cheat) silently kills a 2nd Roblox process
+            // if it starts unpacking while the 1st hasn't finished initializing.
+            //
+            // Solution: Account.JoinServer now calls NextAccount() only AFTER the
+            // Roblox window appears AND a 2-second stabilization buffer.
+            // LaunchAccounts waits for that NextAccount() signal before proceeding.
+            //
+            // AsyncJoin=true  → wait for window signal (auto-paced, fastest safe speed)
+            // AsyncJoin=false → fixed delay per Settings (default 3s minimum)
+            // =====================================================================
             foreach (Account account in Accounts)
             {
                 if (Token.IsCancellationRequested) break;
@@ -2249,23 +2298,36 @@ namespace RBX_Alt_Manager
                     if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
                 }
 
-                Program.Logger.Info($"[Sequential Launch] Launching account {launchedCount + 1}/{Accounts.Count}: {account.Username}");
+                Program.Logger.Info($"[Multi-Launch] Launching account {launchedCount + 1}/{Accounts.Count}: {account.Username}");
 
+                LaunchNext = false;
                 string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
                 if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
                 {
-                    Program.Logger.Error($"[Sequential Launch] Failed to launch {account.Username}: {res}");
+                    Program.Logger.Error($"[Multi-Launch] Failed to launch {account.Username}: {res}");
                 }
                 launchedCount++;
 
                 if (launchedCount < Accounts.Count) // Don't wait after the last account
                 {
-                    int delayMs = Math.Max(500, Delay * 1000);
-                    try
+                    if (AsyncJoin)
                     {
-                        await Task.Delay(delayMs, Token.Token);
+                        // Window-stabilized mode: Account.JoinServer already called NextAccount()
+                        // after window appeared + 2s buffer. The signal should already be set.
+                        // Wait up to 35s in case of very slow machines, then continue anyway.
+                        DateTime asyncTimeout = DateTime.Now.AddSeconds(35);
+                        while (!LaunchNext && DateTime.Now < asyncTimeout && !Token.IsCancellationRequested)
+                            await Task.Delay(150);
                     }
-                    catch (TaskCanceledException) { break; }
+                    else
+                    {
+                        // Fixed-delay mode: wait configured delay (min 3s for Byfron safety)
+                        try
+                        {
+                            await Task.Delay(Math.Max(3000, Delay * 1000), Token.Token);
+                        }
+                        catch (TaskCanceledException) { break; }
+                    }
                 }
 
                 LaunchNext = false;
@@ -2273,7 +2335,7 @@ namespace RBX_Alt_Manager
 
             LaunchNext = false;
 
-            Program.Logger.Info($"Finished launching {launchedCount} accounts sequentially");
+            Program.Logger.Info($"[Multi-Launch] Finished launching {launchedCount} accounts successfully.");
 
             Token.Cancel();
             Token.Dispose();

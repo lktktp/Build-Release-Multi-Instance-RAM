@@ -81,6 +81,7 @@ namespace RBX_Alt_Manager
         public static IniSection Prompts;
 
         private static Mutex rbxMultiMutex;
+        private static EventWaitHandle rbxSingletonEvent; // Roblox also checks ROBLOX_singletonEvent in newer versions
         private readonly static object saveLock = new object();
         private readonly static object rgSaveLock = new object();
         public event EventHandler<GameArgs> RecentGameAdded;
@@ -1344,10 +1345,9 @@ namespace RBX_Alt_Manager
         }
 
         /// <summary>
-        /// Ensures the ROBLOX_singletonMutex is held before launching accounts.
-        /// If all Roblox windows were closed, the mutex may have been abandoned.
-        /// This re-acquires it so Multi-Roblox works even after reopening the app
-        /// or closing all Roblox windows and relaunching.
+        /// Ensures ROBLOX_singletonMutex + ROBLOX_singletonEvent are both held before a launch.
+        /// Roblox (new Byfron/Hyperion) checks BOTH handles to decide if multi-instance is allowed.
+        /// Re-acquires them if they were abandoned when all Roblox windows closed.
         /// </summary>
         public void EnsureMultiMutexHealthy()
         {
@@ -1355,13 +1355,13 @@ namespace RBX_Alt_Manager
 
             bool hasRoblox = Process.GetProcessesByName("RobloxPlayerBeta").Length > 0;
 
-            // If no Roblox running, the old mutex may be abandoned/released — recreate it
+            // --- Mutex ---
             if (!hasRoblox && rbxMultiMutex != null)
             {
                 try { rbxMultiMutex.ReleaseMutex(); } catch { }
                 try { rbxMultiMutex.Close(); } catch { }
                 rbxMultiMutex = null;
-                Program.Logger.Info("[Mutex] Released stale ROBLOX_singletonMutex (no Roblox running)");
+                Program.Logger.Info("[Mutex] Released stale ROBLOX_singletonMutex");
             }
 
             if (rbxMultiMutex == null)
@@ -1371,8 +1371,7 @@ namespace RBX_Alt_Manager
                     rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool created);
                     if (!created)
                     {
-                        // Mutex exists but held by someone else — kill remaining Roblox processes and retry
-                        Program.Logger.Warn("[Mutex] ROBLOX_singletonMutex held by another process, clearing...");
+                        Program.Logger.Warn("[Mutex] ROBLOX_singletonMutex held by another — killing Roblox and retrying...");
                         KillExistingRobloxProcesses();
                         System.Threading.Thread.Sleep(500);
                         try { rbxMultiMutex.Close(); } catch { }
@@ -1384,14 +1383,33 @@ namespace RBX_Alt_Manager
                         Program.Logger.Info("[Mutex] ROBLOX_singletonMutex acquired successfully");
                     }
                 }
-                catch (Exception ex)
-                {
-                    Program.Logger.Error($"[Mutex] Failed to ensure mutex: {ex.Message}");
-                }
+                catch (Exception ex) { Program.Logger.Error($"[Mutex] Failed: {ex.Message}"); }
             }
             else
             {
                 Program.Logger.Info("[Mutex] ROBLOX_singletonMutex already held — OK");
+            }
+
+            // --- Singleton Event (new Byfron check) ---
+            if (!hasRoblox && rbxSingletonEvent != null)
+            {
+                try { rbxSingletonEvent.Close(); } catch { }
+                rbxSingletonEvent = null;
+                Program.Logger.Info("[Event] Released stale ROBLOX_singletonEvent");
+            }
+
+            if (rbxSingletonEvent == null)
+            {
+                try
+                {
+                    rbxSingletonEvent = new EventWaitHandle(true, EventResetMode.ManualReset, "ROBLOX_singletonEvent", out bool created);
+                    Program.Logger.Info($"[Event] ROBLOX_singletonEvent acquired (created={created})");
+                }
+                catch (Exception ex) { Program.Logger.Warn($"[Event] ROBLOX_singletonEvent: {ex.Message}"); }
+            }
+            else
+            {
+                Program.Logger.Info("[Event] ROBLOX_singletonEvent already held — OK");
             }
         }
 
@@ -1406,45 +1424,46 @@ namespace RBX_Alt_Manager
 
                 try
                 {
-                    rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex");
-
-                    if (!rbxMultiMutex.WaitOne(TimeSpan.Zero, true))
+                    // Hold ROBLOX_singletonMutex so Roblox instances see it's already held
+                    rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool mutexCreated);
+                    if (!mutexCreated)
                     {
-                        try
+                        // Mutex already held by something - kill roblox and retry
+                        try { rbxMultiMutex.Close(); } catch { }
+                        rbxMultiMutex = null;
+                        KillExistingRobloxProcesses();
+                        System.Threading.Thread.Sleep(500);
+                        rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool mutexCreated2);
+                        if (!mutexCreated2)
                         {
-                            rbxMultiMutex.Close();
-                            rbxMultiMutex = null;
-
-                            // Force kill any remaining Roblox processes and retry
-                            KillExistingRobloxProcesses();
-                            System.Threading.Thread.Sleep(500);
-
-                            rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex");
-
-                            if (!rbxMultiMutex.WaitOne(TimeSpan.Zero, true))
-                            {
-                                Program.Logger.Error("Failed to acquire ROBLOX_singletonMutex on retry");
-                                return false;
-                            }
-
-                            Program.Logger.Info("Successfully acquired ROBLOX_singletonMutex on retry");
-                        }
-                        catch
-                        {
+                            Program.Logger.Error("Failed to acquire ROBLOX_singletonMutex on retry");
                             return false;
                         }
+                        Program.Logger.Info("Successfully acquired ROBLOX_singletonMutex on retry");
                     }
                     else
                     {
                         Program.Logger.Info("Successfully acquired ROBLOX_singletonMutex");
                     }
                 }
-                catch { return false; }
+                catch (Exception ex) { Program.Logger.Error($"Mutex error: {ex.Message}"); return false; }
+
+                // Also hold ROBLOX_singletonEvent (newer Roblox/Byfron checks this too)
+                try
+                {
+                    rbxSingletonEvent = new EventWaitHandle(true, EventResetMode.ManualReset, "ROBLOX_singletonEvent", out bool eventCreated);
+                    Program.Logger.Info($"ROBLOX_singletonEvent acquired (created={eventCreated})");
+                }
+                catch (Exception ex)
+                {
+                    // Non-fatal: older Roblox versions don't use this
+                    Program.Logger.Warn($"ROBLOX_singletonEvent: {ex.Message}");
+                }
             }
-            else if (!Enabled && rbxMultiMutex != null)
+            else if (!Enabled)
             {
-                rbxMultiMutex.Close();
-                rbxMultiMutex = null;
+                if (rbxMultiMutex != null) { try { rbxMultiMutex.ReleaseMutex(); } catch { } try { rbxMultiMutex.Close(); } catch { } rbxMultiMutex = null; }
+                if (rbxSingletonEvent != null) { try { rbxSingletonEvent.Close(); } catch { } rbxSingletonEvent = null; }
             }
 
             return true;

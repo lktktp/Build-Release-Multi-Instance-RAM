@@ -719,10 +719,29 @@ namespace RBX_Alt_Manager
                         Process RbxProcess = Process.Start(Roblox);
                         Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
 
-                        // Step 3: Wait for Roblox to start and create its own mutex handle
-                        await Task.Delay(1500);
+                        // Step 3: Wait for Roblox window to appear (proves Byfron unpack & singleton check passed)
+                        if (RbxProcess != null && !RbxProcess.HasExited)
+                        {
+                            DateTime timeout = DateTime.Now.AddSeconds(30);
+                            while (DateTime.Now < timeout)
+                            {
+                                try
+                                {
+                                    RbxProcess.Refresh();
+                                    if (RbxProcess.HasExited) break;
+                                    if (RbxProcess.MainWindowHandle != IntPtr.Zero)
+                                    {
+                                        Program.Logger.Info($"Roblox window appeared for {Username} (PID: {RbxProcess.Id})");
+                                        break;
+                                    }
+                                }
+                                catch { break; }
+                                await Task.Delay(250);
+                            }
+                        }
 
-                        // Step 4: Re-acquire the mutex so next instance also bypasses singleton
+                        // Step 4: Re-acquire the mutex after launch so next instance also bypasses singleton
+                        await Task.Delay(800);
                         AccountManager.Instance.ReacquireMutexAfterLaunch();
 
                         // Signal launcher: safe to proceed to next account

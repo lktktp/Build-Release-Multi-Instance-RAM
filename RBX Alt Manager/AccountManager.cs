@@ -81,7 +81,6 @@ namespace RBX_Alt_Manager
         public static IniSection Prompts;
 
         private static Mutex rbxMultiMutex;
-        private static EventWaitHandle rbxSingletonEvent; // Roblox also checks ROBLOX_singletonEvent in newer versions
         private readonly static object saveLock = new object();
         private readonly static object rgSaveLock = new object();
         public event EventHandler<GameArgs> RecentGameAdded;
@@ -1389,28 +1388,6 @@ namespace RBX_Alt_Manager
             {
                 Program.Logger.Info("[Mutex] ROBLOX_singletonMutex already held — OK");
             }
-
-            // --- Singleton Event (new Byfron check) ---
-            if (!hasRoblox && rbxSingletonEvent != null)
-            {
-                try { rbxSingletonEvent.Close(); } catch { }
-                rbxSingletonEvent = null;
-                Program.Logger.Info("[Event] Released stale ROBLOX_singletonEvent");
-            }
-
-            if (rbxSingletonEvent == null)
-            {
-                try
-                {
-                    rbxSingletonEvent = new EventWaitHandle(true, EventResetMode.ManualReset, "ROBLOX_singletonEvent", out bool created);
-                    Program.Logger.Info($"[Event] ROBLOX_singletonEvent acquired (created={created})");
-                }
-                catch (Exception ex) { Program.Logger.Warn($"[Event] ROBLOX_singletonEvent: {ex.Message}"); }
-            }
-            else
-            {
-                Program.Logger.Info("[Event] ROBLOX_singletonEvent already held — OK");
-            }
         }
 
         public bool UpdateMultiRoblox()
@@ -1447,23 +1424,10 @@ namespace RBX_Alt_Manager
                     }
                 }
                 catch (Exception ex) { Program.Logger.Error($"Mutex error: {ex.Message}"); return false; }
-
-                // Also hold ROBLOX_singletonEvent (newer Roblox/Byfron checks this too)
-                try
-                {
-                    rbxSingletonEvent = new EventWaitHandle(true, EventResetMode.ManualReset, "ROBLOX_singletonEvent", out bool eventCreated);
-                    Program.Logger.Info($"ROBLOX_singletonEvent acquired (created={eventCreated})");
-                }
-                catch (Exception ex)
-                {
-                    // Non-fatal: older Roblox versions don't use this
-                    Program.Logger.Warn($"ROBLOX_singletonEvent: {ex.Message}");
-                }
             }
             else if (!Enabled)
             {
                 if (rbxMultiMutex != null) { try { rbxMultiMutex.ReleaseMutex(); } catch { } try { rbxMultiMutex.Close(); } catch { } rbxMultiMutex = null; }
-                if (rbxSingletonEvent != null) { try { rbxSingletonEvent.Close(); } catch { } rbxSingletonEvent = null; }
             }
 
             return true;
@@ -2291,69 +2255,6 @@ namespace RBX_Alt_Manager
 
             Program.Logger.Info($"[Multi-Launch] Starting launch for {Accounts.Count} accounts (AsyncJoin={AsyncJoin}, Delay={Delay}s)...");
 
-            if (AsyncJoin)
-            {
-                // =========================================================
-                // CONCURRENT LAUNCH (ผู้ใช้ขอเปิดพร้อมกัน / ไวๆ)
-                // Launches tasks in parallel but staggers them by 'Delay' seconds
-                // to avoid Byfron unpacking collision.
-                // =========================================================
-                var launchTasks = new List<Task>();
-                
-                for (int i = 0; i < Accounts.Count; i++)
-                {
-                    if (Token.IsCancellationRequested) break;
-                    
-                    Account account = Accounts[i];
-                    long PlaceId = PlaceID;
-                    string JobId = JobID;
-                    
-                    if (!FollowUser)
-                    {
-                        if (!string.IsNullOrEmpty(account.GetField("SavedPlaceId")) && long.TryParse(account.GetField("SavedPlaceId"), out long PID)) PlaceId = PID;
-                        if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
-                    }
-
-                    int index = i;
-                    launchTasks.Add(Task.Run(async () =>
-                    {
-                        try
-                        {
-                            if (index > 0)
-                            {
-                                int staggerMs = Math.Max(1500, Delay * 1000);
-                                await Task.Delay(index * staggerMs, Token.Token);
-                            }
-
-                            if (!Token.IsCancellationRequested)
-                            {
-                                Program.Logger.Info($"[Parallel Launch] Launching account {index + 1}/{Accounts.Count}: {account.Username}");
-                                string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
-                                if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
-                                {
-                                    Program.Logger.Error($"[Parallel Launch] Failed to launch {account.Username}: {res}");
-                                }
-                            }
-                        }
-                        catch (TaskCanceledException) { }
-                        catch (Exception ex)
-                        {
-                            Program.Logger.Error($"[Parallel Launch] Error launching {account.Username}: {ex.Message}");
-                        }
-                    }));
-                }
-
-                await Task.WhenAll(launchTasks);
-                Program.Logger.Info($"[Parallel Launch] Finished launching {Accounts.Count} accounts!");
-
-                Token.Cancel();
-                Token.Dispose();
-                return;
-            }
-
-            // =====================================================================
-            // WINDOW-STABILIZED SEQUENTIAL LAUNCH (Byfron-safe, ช้าแต่ชัวร์)
-            // =====================================================================
             foreach (Account account in Accounts)
             {
                 if (Token.IsCancellationRequested) break;
@@ -2379,12 +2280,24 @@ namespace RBX_Alt_Manager
 
                 if (launchedCount < Accounts.Count) // Don't wait after the last account
                 {
-                    // Fixed-delay mode: wait configured delay (min 3s for Byfron safety)
-                    try
+                    if (AsyncJoin)
                     {
-                        await Task.Delay(Math.Max(3000, Delay * 1000), Token.Token);
+                        // Auto-paced fast mode: JoinServer signals NextAccount() as soon as the
+                        // Roblox window appears and mutex is safely reacquired.
+                        // We wait for that signal (up to 30s) and immediately launch the next account!
+                        DateTime asyncTimeout = DateTime.Now.AddSeconds(30);
+                        while (!LaunchNext && DateTime.Now < asyncTimeout && !Token.IsCancellationRequested)
+                            await Task.Delay(100);
                     }
-                    catch (TaskCanceledException) { break; }
+                    else
+                    {
+                        // Fixed-delay mode based on Settings
+                        try
+                        {
+                            await Task.Delay(Math.Max(1000, Delay * 1000), Token.Token);
+                        }
+                        catch (TaskCanceledException) { break; }
+                    }
                 }
 
                 LaunchNext = false;

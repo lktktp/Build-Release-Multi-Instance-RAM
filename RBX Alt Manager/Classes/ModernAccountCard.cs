@@ -42,6 +42,7 @@ namespace RBX_Alt_Manager.Classes
 
         // Selection state
         private bool _isSelected = false;
+        private bool _suppressCheckChanged = false;
         public bool IsSelected
         {
             get => _isSelected;
@@ -50,7 +51,15 @@ namespace RBX_Alt_Manager.Classes
                 if (_isSelected != value)
                 {
                     _isSelected = value;
-                    if (chkSelect != null) chkSelect.Checked = value;
+                    _suppressCheckChanged = true;
+                    try
+                    {
+                        if (chkSelect != null) chkSelect.Checked = value;
+                    }
+                    finally
+                    {
+                        _suppressCheckChanged = false;
+                    }
                     this.Invalidate();
                 }
             }
@@ -97,6 +106,7 @@ namespace RBX_Alt_Manager.Classes
 
             chkSelect.CheckedChanged += (s, e) =>
             {
+                if (_suppressCheckChanged) return;
                 _isSelected = chkSelect.Checked;
                 this.Invalidate();
                 SelectionToggled?.Invoke(this, chkSelect.Checked);

@@ -738,8 +738,9 @@ namespace RBX_Alt_Manager
                         Process RbxProcess = Process.Start(Roblox);
                         Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
 
-                        // Minimal safe micro-stagger (400ms) to let process initialize handles
-                        await Task.Delay(400);
+                        // Safe micro-stagger: 800ms gives each process enough time to initialize network connection
+                        // without triggering concurrent connection drops (Reason 285) on the game server
+                        await Task.Delay(800);
 
                         // Signal launcher immediately: safe to proceed to next account!
                         AccountManager.Instance.NextAccount();
@@ -794,79 +795,73 @@ namespace RBX_Alt_Manager
         }
 
         /// <summary>
-        /// Find the RobloxPlayerBeta.exe path by checking known locations
+        /// Find the RobloxPlayerBeta.exe path by checking known locations,
+        /// ALWAYS picking the newest version to avoid triggering background auto-updater terminations.
         /// </summary>
         private string FindRobloxPlayerPath()
         {
+            var candidates = new List<string>();
+
             try
             {
-                // Check HKCU first (user-level install, standard for modern Roblox)
-                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Classes\roblox-player\shell\open\command"))
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Classes\roblox-player\shell\open\command") ?? Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"roblox-player\shell\open\command"))
                 {
-                    if (key != null)
+                    if (key != null && key.GetValue(null) is string cmd && !string.IsNullOrEmpty(cmd))
                     {
-                        string cmd = key.GetValue(null) as string;
-                        if (!string.IsNullOrEmpty(cmd))
-                        {
-                            var match = Regex.Match(cmd, "\"([^\"]+RobloxPlayerBeta\\.exe)\"");
-                            if (match.Success && File.Exists(match.Groups[1].Value))
-                                return match.Groups[1].Value;
-                        }
-                    }
-                }
-
-                // Check ClassesRoot
-                using (var key = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"roblox-player\shell\open\command"))
-                {
-                    if (key != null)
-                    {
-                        string cmd = key.GetValue(null) as string;
-                        if (!string.IsNullOrEmpty(cmd))
-                        {
-                            var match = Regex.Match(cmd, "\"([^\"]+RobloxPlayerBeta\\.exe)\"");
-                            if (match.Success && File.Exists(match.Groups[1].Value))
-                                return match.Groups[1].Value;
-                        }
+                        var match = Regex.Match(cmd, "\"([^\"]+RobloxPlayerBeta\\.exe)\"");
+                        if (match.Success && File.Exists(match.Groups[1].Value))
+                            candidates.Add(match.Groups[1].Value);
                     }
                 }
             }
             catch { }
 
-            // Try Program Files (x86) first
-            string rPath = @"C:\Program Files (x86)\Roblox\Versions\" + AccountManager.CurrentVersion;
-            if (Directory.Exists(rPath) && File.Exists(Path.Combine(rPath, "RobloxPlayerBeta.exe")))
-                return Path.Combine(rPath, "RobloxPlayerBeta.exe");
+            string[] searchBases = {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Roblox\Versions"),
+                @"C:\Program Files (x86)\Roblox\Versions",
+                @"C:\Program Files\Roblox\Versions"
+            };
 
-            // Try LocalAppData
-            rPath = Path.Combine(Environment.GetEnvironmentVariable("LocalAppData"), @"Roblox\Versions\" + AccountManager.CurrentVersion);
-            if (Directory.Exists(rPath) && File.Exists(Path.Combine(rPath, "RobloxPlayerBeta.exe")))
-                return Path.Combine(rPath, "RobloxPlayerBeta.exe");
-
-            // Try searching all versions in LocalAppData
-            string versionsDir = Path.Combine(Environment.GetEnvironmentVariable("LocalAppData"), @"Roblox\Versions");
-            if (Directory.Exists(versionsDir))
+            foreach (var baseDir in searchBases)
             {
-                foreach (string dir in Directory.GetDirectories(versionsDir).OrderByDescending(d => Directory.GetCreationTime(d)))
+                if (!Directory.Exists(baseDir)) continue;
+                try
                 {
-                    string exePath = Path.Combine(dir, "RobloxPlayerBeta.exe");
-                    if (File.Exists(exePath))
-                        return exePath;
+                    foreach (var dir in Directory.GetDirectories(baseDir))
+                    {
+                        string exe = Path.Combine(dir, "RobloxPlayerBeta.exe");
+                        if (File.Exists(exe)) candidates.Add(exe);
+                    }
+                }
+                catch { }
+            }
+
+            if (candidates.Count == 0) return null;
+
+            // Pick the candidate with the highest file version
+            string bestPath = candidates[0];
+            Version bestVer = new Version(0, 0, 0, 0);
+
+            foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var vi = FileVersionInfo.GetVersionInfo(path);
+                    Version v = new Version(vi.FileMajorPart, vi.FileMinorPart, vi.FileBuildPart, vi.FilePrivatePart);
+                    if (v > bestVer)
+                    {
+                        bestVer = v;
+                        bestPath = path;
+                    }
+                }
+                catch
+                {
+                    if (bestVer == new Version(0, 0, 0, 0)) bestPath = path;
                 }
             }
 
-            // Try Program Files (x86) all versions
-            versionsDir = @"C:\Program Files (x86)\Roblox\Versions";
-            if (Directory.Exists(versionsDir))
-            {
-                foreach (string dir in Directory.GetDirectories(versionsDir).OrderByDescending(d => Directory.GetCreationTime(d)))
-                {
-                    string exePath = Path.Combine(dir, "RobloxPlayerBeta.exe");
-                    if (File.Exists(exePath))
-                        return exePath;
-                }
-            }
-
-            return null;
+            Program.Logger.Info($"Selected RobloxPlayerBeta.exe: {bestPath} (v{bestVer})");
+            return bestPath;
         }
 
         /// <summary>

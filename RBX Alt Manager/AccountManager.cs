@@ -1347,46 +1347,23 @@ namespace RBX_Alt_Manager
         /// Ensures ROBLOX_singletonMutex + ROBLOX_singletonEvent are both held before a launch.
         /// Roblox (new Byfron/Hyperion) checks BOTH handles to decide if multi-instance is allowed.
         /// Re-acquires them if they were abandoned when all Roblox windows closed.
+        /// <summary>
+        /// Ensures the ROBLOX_singletonMutex is continuously held by RAM.
+        /// Once acquired, it is KEPT HELD permanently so that Roblox instances never
+        /// trigger single-instance teardowns or WindowsAppReload disconnects.
         /// </summary>
         public void EnsureMultiMutexHealthy()
         {
             if (!General.Get<bool>("EnableMultiRbx")) return;
-
-            bool hasRoblox = Process.GetProcessesByName("RobloxPlayerBeta").Length > 0;
-
-            // --- Mutex ---
-            if (!hasRoblox && rbxMultiMutex != null)
-            {
-                try { rbxMultiMutex.ReleaseMutex(); } catch { }
-                try { rbxMultiMutex.Close(); } catch { }
-                rbxMultiMutex = null;
-                Program.Logger.Info("[Mutex] Released stale ROBLOX_singletonMutex");
-            }
 
             if (rbxMultiMutex == null)
             {
                 try
                 {
                     rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool created);
-                    if (!created)
-                    {
-                        Program.Logger.Warn("[Mutex] ROBLOX_singletonMutex held by another — killing Roblox and retrying...");
-                        KillExistingRobloxProcesses();
-                        System.Threading.Thread.Sleep(500);
-                        try { rbxMultiMutex.Close(); } catch { }
-                        rbxMultiMutex = new Mutex(true, "ROBLOX_singletonMutex", out bool created2);
-                        Program.Logger.Info($"[Mutex] ROBLOX_singletonMutex re-created (owned={created2})");
-                    }
-                    else
-                    {
-                        Program.Logger.Info("[Mutex] ROBLOX_singletonMutex acquired successfully");
-                    }
+                    Program.Logger.Info($"[Mutex] ROBLOX_singletonMutex acquired successfully (created={created})");
                 }
                 catch (Exception ex) { Program.Logger.Error($"[Mutex] Failed: {ex.Message}"); }
-            }
-            else
-            {
-                Program.Logger.Info("[Mutex] ROBLOX_singletonMutex already held — OK");
             }
         }
 

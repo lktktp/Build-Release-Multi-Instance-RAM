@@ -1010,13 +1010,14 @@ namespace RBX_Alt_Manager
                 bool allSelected = SelectedAccounts != null && SelectedAccounts.Count == AccountsList.Count && AccountsList.Count > 0;
                 if (allSelected)
                 {
-                    SelectedAccounts = new List<Account>();
+                    if (SelectedAccounts == null) SelectedAccounts = new List<Account>();
+                    else SelectedAccounts.Clear();
                     SelectedAccount = null;
                 }
                 else
                 {
                     SelectedAccounts = new List<Account>(AccountsList);
-                    if (AccountsList.Count > 0) SelectedAccount = AccountsList[0];
+                    SelectedAccount = AccountsList.Count > 0 ? AccountsList[0] : null;
                 }
 
                 try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
@@ -1461,26 +1462,80 @@ namespace RBX_Alt_Manager
                     if (rightAvatarBox != null) rightAvatarBox.Image = null;
                 }
 
-                bool hasSelection = SelectedAccount != null;
-                JoinServer.Enabled = hasSelection;
-                Remove.Enabled = hasSelection;
-                ServerList.Enabled = hasSelection;
-                Follow.Enabled = hasSelection;
-                SetAlias.Enabled = hasSelection;
+                UpdateActionButtonsState();
 
                 cardsContainer.ResumeLayout(true);
             });
         }
 
+        private bool isUpdatingSelection = false;
+
         private void UpdateCardsSelectionState()
         {
-            foreach (var card in modernCards)
+            if (isUpdatingSelection) return;
+            isUpdatingSelection = true;
+            try
             {
-                bool isSel = (SelectedAccount == card.Account || (SelectedAccounts != null && SelectedAccounts.Contains(card.Account)));
-                card.IsSelected = isSel;
+                foreach (var card in modernCards)
+                {
+                    bool isSel = (SelectedAccount == card.Account || (SelectedAccounts != null && SelectedAccounts.Contains(card.Account)));
+                    card.IsSelected = isSel;
+                }
+                UpdateJoinButtonText();
+                UpdateRightPanelDetails(SelectedAccount);
+                UpdateActionButtonsState();
             }
-            UpdateJoinButtonText();
-            UpdateRightPanelDetails(SelectedAccount);
+            finally
+            {
+                isUpdatingSelection = false;
+            }
+        }
+
+        private void UpdateActionButtonsState()
+        {
+            int selCount = (SelectedAccounts != null && SelectedAccounts.Count > 0) ? SelectedAccounts.Count : (SelectedAccount != null ? 1 : 0);
+            bool hasSelection = selCount > 0;
+
+            if (JoinServer != null)
+            {
+                JoinServer.Enabled = hasSelection;
+                JoinServer.BackColor = hasSelection ? Color.FromArgb(37, 99, 235) : Color.FromArgb(30, 41, 59);
+                JoinServer.ForeColor = hasSelection ? Color.White : Color.FromArgb(148, 163, 184);
+            }
+
+            if (Remove != null)
+            {
+                Remove.Enabled = hasSelection;
+                Remove.BackColor = hasSelection ? Color.FromArgb(225, 29, 72) : Color.FromArgb(40, 20, 30);
+                Remove.ForeColor = hasSelection ? Color.White : Color.FromArgb(148, 163, 184);
+            }
+
+            if (ServerList != null)
+            {
+                ServerList.Enabled = true; // Utilities menu is ALWAYS active!
+                ServerList.BackColor = Color.FromArgb(30, 41, 59);
+                ServerList.ForeColor = Color.White;
+            }
+
+            if (Follow != null)
+            {
+                Follow.Enabled = hasSelection;
+                Follow.BackColor = hasSelection ? Color.FromArgb(99, 102, 241) : Color.FromArgb(30, 41, 59);
+                Follow.ForeColor = hasSelection ? Color.White : Color.FromArgb(148, 163, 184);
+            }
+
+            if (SetAlias != null)
+            {
+                SetAlias.Enabled = hasSelection;
+                SetAlias.BackColor = hasSelection ? Color.FromArgb(30, 41, 59) : Color.FromArgb(20, 25, 35);
+                SetAlias.ForeColor = hasSelection ? Color.White : Color.FromArgb(148, 163, 184);
+            }
+
+            if (btnSelectAll != null)
+            {
+                bool allSel = SelectedAccounts != null && SelectedAccounts.Count == (AccountsList?.Count ?? 0) && (AccountsList?.Count ?? 0) > 0;
+                btnSelectAll.Text = allSel ? (IsThai ? "ยกเลิกทั้งหมด" : "Deselect All") : (IsThai ? "เลือกทั้งหมด" : "Select All");
+            }
         }
 
         private void UpdateJoinButtonText()

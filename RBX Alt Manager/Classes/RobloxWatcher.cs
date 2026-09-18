@@ -72,7 +72,7 @@ namespace RBX_Alt_Manager.Classes
                 // This ignores the second roblox process which would cause 268 (Unexpected client behavior) kicks if it were closed.
                 if (string.IsNullOrEmpty(CommandLine)) continue; // Roblox's second process
                 if (CommandLine.StartsWith("\\??\\")) continue; // Roblox's second process
-                if (!CommandLine.Contains("-t ") && !CommandLine.Contains("-j ")) continue; // Check if this process was ran with an authentcation token and a joinScript
+                if (!CommandLine.Contains("-t ") && !CommandLine.Contains("-j ") && !CommandLine.Contains("roblox-player:")) continue; // Check if this process was ran with an authentcation token and a joinScript
 
                 try
                 {
@@ -92,7 +92,7 @@ namespace RBX_Alt_Manager.Classes
                 // MULTI-INSTANCE FIX: Increased grace period for window position saving
                 if (RememberWindowPositions && (DateTime.Now - process.StartTime).TotalSeconds > 60)
                 {
-                    var TrackerMatch = Regex.Match(CommandLine, @"\-b (\d+)");
+                    var TrackerMatch = Regex.Match(CommandLine, @"(?:\-b\s+|browsertrackerid:)(\d+)");
                     string TrackerID = TrackerMatch.Success ? TrackerMatch.Groups[1].Value : string.Empty;
 
                     if (AccountManager.AccountsList.FirstOrDefault(Account => Account.BrowserTrackerID == TrackerID) is Account account)

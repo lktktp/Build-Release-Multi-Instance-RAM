@@ -108,7 +108,7 @@ namespace RBX_Alt_Manager.Classes
 
                         if (!string.IsNullOrEmpty(cmdLine))
                         {
-                            var trackerMatch = System.Text.RegularExpressions.Regex.Match(cmdLine, @"\-b (\d+)");
+                            var trackerMatch = System.Text.RegularExpressions.Regex.Match(cmdLine, @"(?:\-b\s+|browsertrackerid:)(\d+)");
                             string trackerId = trackerMatch.Success ? trackerMatch.Groups[1].Value : string.Empty;
 
                             if (!string.IsNullOrEmpty(trackerId))

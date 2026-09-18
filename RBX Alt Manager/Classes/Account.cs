@@ -675,12 +675,12 @@ namespace RBX_Alt_Manager
                     else
                         joinUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame{(string.IsNullOrEmpty(JobID) ? "" : "Job")}&browserTrackerId={BrowserTrackerID}&placeId={PlaceID}{(string.IsNullOrEmpty(JobID) ? "" : ("&gameId=" + JobID))}&isPlayTogetherGame=false{(AccountManager.IsTeleport ? "&isTeleport=true" : "")}";
 
-                    string protocolUri = $"roblox-player:1+launchmode:play+gameinfo:{Ticket}+launchtime:{LaunchTime}+placelauncherurl:{HttpUtility.UrlEncode(joinUrl)}+browsertrackerid:{BrowserTrackerID}+robloxLocale:en_us+gameLocale:en_us+channel:";
+                    string fallbackUri = $"roblox-player:1+launchmode:play+gameinfo:{Ticket}+launchtime:{LaunchTime}+placelauncherurl:{HttpUtility.UrlEncode(joinUrl)}+browsertrackerid:{BrowserTrackerID}+robloxLocale:en_us+gameLocale:en_us+channel:";
                     await Task.Run(() =>
                     {
                         try
                         {
-                            Process.Start(new ProcessStartInfo { FileName = protocolUri, UseShellExecute = true });
+                            Process.Start(new ProcessStartInfo { FileName = fallbackUri, UseShellExecute = true });
                             System.Threading.Thread.Sleep(3000);
                             AccountManager.Instance.NextAccount();
                             _ = Task.Run(AdjustWindowPosition);
@@ -704,6 +704,8 @@ namespace RBX_Alt_Manager
                 else
                     joinScriptUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame{(string.IsNullOrEmpty(JobID) ? "" : "Job")}&browserTrackerId={BrowserTrackerID}&placeId={PlaceID}{(string.IsNullOrEmpty(JobID) ? "" : ("&gameId=" + JobID))}&isPlayTogetherGame=false{(AccountManager.IsTeleport ? "&isTeleport=true" : "")}";
 
+                string protocolUri = $"roblox-player:1+launchmode:play+gameinfo:{Ticket}+launchtime:{LaunchTime}+placelauncherurl:{HttpUtility.UrlEncode(joinScriptUrl)}+browsertrackerid:{BrowserTrackerID}+robloxLocale:en_us+gameLocale:en_us+channel:";
+
                 await Task.Run(async () =>
                 {
                     try
@@ -711,10 +713,12 @@ namespace RBX_Alt_Manager
                         // Ensure Multi-Roblox mutex is held BEFORE launch
                         AccountManager.Instance.EnsureMultiMutexHealthy();
 
-                        // Launch RobloxPlayerBeta.exe directly with -t -j -b flags (NO --app, so it does not reuse window)
+                        // Launch RobloxPlayerBeta.exe directly with protocolUri
+                        // This authenticates via gameinfo:{Ticket} and connects directly to the game (NO login screen)
+                        // Without +LaunchExp:InApp, it runs standalone and does not reuse or close other windows
                         ProcessStartInfo Roblox = new ProcessStartInfo(RPath);
                         Roblox.UseShellExecute = false;
-                        Roblox.Arguments = $"-t {Ticket} -j \"{joinScriptUrl}\" -b {BrowserTrackerID} --launchtime={LaunchTime}";
+                        Roblox.Arguments = protocolUri;
 
                         Process RbxProcess = Process.Start(Roblox);
                         Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
@@ -897,7 +901,7 @@ namespace RBX_Alt_Manager
 
                     string CommandLine = process.GetCommandLine();
 
-                    var TrackerMatch = Regex.Match(CommandLine, @"\-b (\d+)");
+                    var TrackerMatch = Regex.Match(CommandLine, @"(?:\-b\s+|browsertrackerid:)(\d+)");
                     string TrackerID = TrackerMatch.Success ? TrackerMatch.Groups[1].Value : string.Empty;
 
                     if (TrackerID != BrowserTrackerID) continue;

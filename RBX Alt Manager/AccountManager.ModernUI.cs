@@ -83,7 +83,7 @@ namespace RBX_Alt_Manager
                     {
                         SelectedAccounts = new List<Account>(AccountsList);
                         if (AccountsList.Count > 0) SelectedAccount = AccountsList[0];
-                        try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                        SafeSyncAccountsView();
                         UpdateCardsSelectionState();
                         if (SelectedAccount != null) UpdateRightPanelDetails(SelectedAccount);
                         e.SuppressKeyPress = true;
@@ -1008,7 +1008,9 @@ namespace RBX_Alt_Manager
             btnSelectAll.Click += (s, e) =>
             {
                 bool allSelected = SelectedAccounts != null && SelectedAccounts.Count == AccountsList.Count && AccountsList.Count > 0;
-                if (allSelected)
+                bool isDeselectMode = allSelected || (btnSelectAll.Text == (IsThai ? "ยกเลิกทั้งหมด" : "Deselect All"));
+
+                if (isDeselectMode)
                 {
                     if (SelectedAccounts == null) SelectedAccounts = new List<Account>();
                     else SelectedAccounts.Clear();
@@ -1020,7 +1022,7 @@ namespace RBX_Alt_Manager
                     SelectedAccount = AccountsList.Count > 0 ? AccountsList[0] : null;
                 }
 
-                try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                SafeSyncAccountsView();
                 UpdateCardsSelectionState();
             };
 
@@ -1348,7 +1350,7 @@ namespace RBX_Alt_Manager
                             if (SelectedAccount == acc)
                                 SelectedAccount = SelectedAccounts.Count > 0 ? SelectedAccounts[SelectedAccounts.Count - 1] : null;
                         }
-                        try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                        SafeSyncAccountsView();
                         UpdateCardsSelectionState();
                     };
 
@@ -1380,7 +1382,7 @@ namespace RBX_Alt_Manager
                             SelectedAccount = clickedAcc;
                         }
 
-                        try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                        SafeSyncAccountsView();
                         UpdateCardsSelectionState();
                     };
 
@@ -1441,7 +1443,7 @@ namespace RBX_Alt_Manager
                 {
                     SelectedAccount = AccountsList[0];
                     SelectedAccounts = new List<Account> { SelectedAccount };
-                    try { AccountsView.SelectedObjects = SelectedAccounts; } catch { }
+                    SafeSyncAccountsView();
                     UpdateCardsSelectionState();
                     UpdateRightPanelDetails(SelectedAccount);
                 }
@@ -1466,6 +1468,25 @@ namespace RBX_Alt_Manager
 
                 cardsContainer.ResumeLayout(true);
             });
+        }
+
+        public void SafeSyncAccountsView()
+        {
+            IsSyncingAccountsView = true;
+            try
+            {
+                if (SelectedAccounts != null && SelectedAccounts.Count > 0)
+                    AccountsView.SelectedObjects = SelectedAccounts;
+                else if (SelectedAccount != null)
+                    AccountsView.SelectedObjects = new List<Account> { SelectedAccount };
+                else
+                    AccountsView.SelectedObjects = null;
+            }
+            catch { }
+            finally
+            {
+                IsSyncingAccountsView = false;
+            }
         }
 
         private bool isUpdatingSelection = false;

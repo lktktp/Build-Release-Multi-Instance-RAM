@@ -1476,15 +1476,23 @@ namespace RBX_Alt_Manager
 
         private void Remove_Click(object sender, EventArgs e)
         {
-            if (AccountsView.SelectedObjects.Count > 1)
+            List<Account> accountsToRemove = (SelectedAccounts != null && SelectedAccounts.Count > 1)
+                ? new List<Account>(SelectedAccounts)
+                : (AccountsView.SelectedObjects != null && AccountsView.SelectedObjects.Count > 1
+                    ? AccountsView.SelectedObjects.Cast<Account>().ToList()
+                    : null);
+
+            if (accountsToRemove != null && accountsToRemove.Count > 1)
             {
-                DialogResult result = MessageBox.Show($"Are you sure you want to remove {AccountsView.SelectedObjects.Count} accounts?", "Remove Accounts", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                DialogResult result = MessageBox.Show($"Are you sure you want to remove {accountsToRemove.Count} accounts?", "Remove Accounts", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
                 if (result == DialogResult.Yes)
                 {
-                    foreach (Account acc in AccountsView.SelectedObjects)
+                    foreach (Account acc in accountsToRemove)
                         AccountsList.Remove(acc);
 
+                    SelectedAccounts?.Clear();
+                    SelectedAccount = null;
                     RefreshView();
 
                     SaveAccounts();
@@ -1497,6 +1505,8 @@ namespace RBX_Alt_Manager
                 if (result == DialogResult.Yes)
                 {
                     AccountsList.RemoveAll(x => x == SelectedAccount);
+                    SelectedAccounts?.Remove(SelectedAccount);
+                    SelectedAccount = null;
 
                     RefreshView();
 
@@ -1617,8 +1627,12 @@ namespace RBX_Alt_Manager
             }
         }
 
+        public static bool IsSyncingAccountsView = false;
+
         private void AccountsView_SelectedIndexChanged(object sender, EventArgs e)
         {
+            if (IsSyncingAccountsView) return;
+
             if (AccountsView.SelectedItems.Count != 1)
             {
                 SelectedAccount = null;
@@ -1626,6 +1640,10 @@ namespace RBX_Alt_Manager
 
                 if (AccountsView.SelectedObjects.Count > 1)
                     SelectedAccounts = AccountsView.SelectedObjects.Cast<Account>().ToList();
+                else if (AccountsView.SelectedObjects.Count == 0)
+                {
+                    if (SelectedAccounts != null) SelectedAccounts.Clear();
+                }
 
                 return;
             }
@@ -1646,7 +1664,11 @@ namespace RBX_Alt_Manager
 
         private void SetAlias_Click(object sender, EventArgs e)
         {
-            foreach (Account account in AccountsView.SelectedObjects)
+            var list = (SelectedAccounts != null && SelectedAccounts.Count > 0)
+                ? new List<Account>(SelectedAccounts)
+                : (SelectedAccount != null ? new List<Account> { SelectedAccount } : AccountsView.SelectedObjects.Cast<Account>().ToList());
+
+            foreach (Account account in list)
                 account.Alias = Alias.Text;
 
             RefreshView();
@@ -1654,7 +1676,11 @@ namespace RBX_Alt_Manager
 
         private void SetDescription_Click(object sender, EventArgs e)
         {
-            foreach (Account account in AccountsView.SelectedObjects)
+            var list = (SelectedAccounts != null && SelectedAccounts.Count > 0)
+                ? new List<Account>(SelectedAccounts)
+                : (SelectedAccount != null ? new List<Account> { SelectedAccount } : AccountsView.SelectedObjects.Cast<Account>().ToList());
+
+            foreach (Account account in list)
                 account.Description = DescriptionBox.Text;
 
             RefreshView();
@@ -1890,11 +1916,20 @@ namespace RBX_Alt_Manager
                     afform.ShowForm();
         }
 
+        private IEnumerable<Account> GetSelectedAccountsOrView()
+        {
+            if (SelectedAccounts != null && SelectedAccounts.Count > 0)
+                return SelectedAccounts;
+            if (SelectedAccount != null)
+                return new List<Account> { SelectedAccount };
+            return AccountsView.SelectedObjects != null ? AccountsView.SelectedObjects.Cast<Account>() : Enumerable.Empty<Account>();
+        }
+
         private void copySecurityTokenToolStripMenuItem_Click(object sender, EventArgs e)
         {
             List<string> Tokens = new List<string>();
 
-            foreach (Account account in AccountsView.SelectedObjects)
+            foreach (Account account in GetSelectedAccountsOrView())
                 Tokens.Add(account.SecurityToken);
 
             Clipboard.SetText(string.Join("\n", Tokens));
@@ -1904,7 +1939,7 @@ namespace RBX_Alt_Manager
         {
             List<string> Usernames = new List<string>();
 
-            foreach (Account account in AccountsView.SelectedObjects)
+            foreach (Account account in GetSelectedAccountsOrView())
                 Usernames.Add(account.Username);
 
             Clipboard.SetText(string.Join("\n", Usernames));
@@ -1914,7 +1949,7 @@ namespace RBX_Alt_Manager
         {
             List<string> Passwords = new List<string>();
 
-            foreach (Account account in AccountsView.SelectedObjects)
+            foreach (Account account in GetSelectedAccountsOrView())
                 Passwords.Add($"{account.Password}");
 
             Clipboard.SetText(string.Join("\n", Passwords));
@@ -1924,7 +1959,7 @@ namespace RBX_Alt_Manager
         {
             List<string> Combos = new List<string>();
 
-            foreach (Account account in AccountsView.SelectedObjects)
+            foreach (Account account in GetSelectedAccountsOrView())
                 Combos.Add($"{account.Username}:{account.Password}");
 
             Clipboard.SetText(string.Join("\n", Combos));
@@ -1934,7 +1969,7 @@ namespace RBX_Alt_Manager
         {
             List<string> UserIds = new List<string>();
 
-            foreach (Account account in AccountsView.SelectedObjects)
+            foreach (Account account in GetSelectedAccountsOrView())
                 UserIds.Add(account.UserID.ToString());
 
             Clipboard.SetText(string.Join("\n", UserIds));
@@ -1967,14 +2002,15 @@ namespace RBX_Alt_Manager
 
         private void moveToToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (AccountsView.SelectedObjects.Count == 0) return;
+            var list = GetSelectedAccountsOrView().ToList();
+            if (list.Count == 0) return;
 
             string GroupName = ShowDialog("Group Name", "Move Account to Group", SelectedAccount != null ? SelectedAccount.Group : string.Empty);
 
             if (GroupName == "/UC") return; // User Cancelled
             if (string.IsNullOrEmpty(GroupName)) GroupName = "Default";
 
-            foreach (Account acc in AccountsView.SelectedObjects)
+            foreach (Account acc in list)
                 acc.Group = GroupName;
 
             RefreshView();

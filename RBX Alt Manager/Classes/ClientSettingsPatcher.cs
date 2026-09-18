@@ -7,8 +7,13 @@ namespace RBX_Alt_Manager.Classes
 {
     public static class ClientSettingsPatcher
     {
+        private static DateTime _lastPatched = DateTime.MinValue;
+
         public static void PatchSettings()
         {
+            if ((DateTime.UtcNow - _lastPatched).TotalSeconds < 30) return;
+            _lastPatched = DateTime.UtcNow;
+
             DirectoryInfo VersionFolder = null;
 
             try

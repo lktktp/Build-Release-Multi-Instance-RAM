@@ -2282,19 +2282,19 @@ namespace RBX_Alt_Manager
                 {
                     if (AsyncJoin)
                     {
-                        // Auto-paced fast mode: JoinServer signals NextAccount() as soon as the
-                        // Roblox window appears and mutex is safely reacquired.
-                        // We wait for that signal (up to 30s) and immediately launch the next account!
-                        DateTime asyncTimeout = DateTime.Now.AddSeconds(30);
+                        // Auto-paced ultra-fast mode: JoinServer signals NextAccount() after a safe 400ms micro-stagger.
+                        // We check with 20ms responsiveness and immediately launch the next account!
+                        DateTime asyncTimeout = DateTime.Now.AddSeconds(15);
                         while (!LaunchNext && DateTime.Now < asyncTimeout && !Token.IsCancellationRequested)
-                            await Task.Delay(100);
+                            await Task.Delay(20);
                     }
                     else
                     {
                         // Fixed-delay mode based on Settings
                         try
                         {
-                            await Task.Delay(Math.Max(1000, Delay * 1000), Token.Token);
+                            int delayMs = Math.Max(250, Delay * 1000);
+                            await Task.Delay(delayMs, Token.Token);
                         }
                         catch (TaskCanceledException) { break; }
                     }

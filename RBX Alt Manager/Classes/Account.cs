@@ -118,12 +118,13 @@ namespace RBX_Alt_Manager
 
         public bool GetAuthTicket(out string Ticket) => GetAuthTicket(out Ticket, out _);
 
-        public bool GetAuthTicket(out string Ticket, out string ErrorDetails)
+        public bool GetAuthTicket(out string Ticket, out string ErrorDetails, string csrfToken = "")
         {
             Ticket = string.Empty;
             ErrorDetails = string.Empty;
 
-            if (!GetCSRFToken(out string Token))
+            string Token = csrfToken;
+            if (string.IsNullOrEmpty(Token) && !GetCSRFToken(out Token))
             {
                 ErrorDetails = $"CSRF Token error: {Token}";
                 return false;
@@ -136,6 +137,20 @@ namespace RBX_Alt_Manager
                 .AddStringBody("{}", ContentType.Json);
 
             RestResponse response = AccountManager.AuthClient.Execute(request);
+
+            // If token was invalid or expired, retry once with fresh CSRF token
+            if (response.StatusCode == HttpStatusCode.Forbidden && !string.IsNullOrEmpty(csrfToken))
+            {
+                if (GetCSRFToken(out Token))
+                {
+                    request = MakeRequest("v1/authentication-ticket/", Method.Post)
+                        .AddHeader("X-CSRF-TOKEN", Token)
+                        .AddHeader("Referer", "https://www.roblox.com/games/4924922222/Brookhaven-RP")
+                        .AddHeader("Origin", "https://www.roblox.com")
+                        .AddStringBody("{}", ContentType.Json);
+                    response = AccountManager.AuthClient.Execute(request);
+                }
+            }
 
             Parameter TicketHeader = response.Headers?.FirstOrDefault(x => string.Equals(x.Name, "rbx-authentication-ticket", StringComparison.OrdinalIgnoreCase));
 
@@ -549,7 +564,7 @@ namespace RBX_Alt_Manager
             if (AccountManager.ShuffleJobID && string.IsNullOrEmpty(JobID))
                 JobID = await Utilities.GetRandomJobId(PlaceID);
 
-            if (GetAuthTicket(out string Ticket, out string AuthError))
+            if (GetAuthTicket(out string Ticket, out string AuthError, Token))
             {
                 // Only close processes that belong to THIS account (matching BrowserTrackerID)
                 // This prevents killing other accounts' Roblox instances
@@ -563,7 +578,7 @@ namespace RBX_Alt_Manager
                             try { cmdLine = proc.GetCommandLine(); } catch { continue; }
                             if (string.IsNullOrEmpty(cmdLine)) continue;
 
-                            var TrackerMatch = Regex.Match(cmdLine, @"\-b (\d+)");
+                            var TrackerMatch = Regex.Match(cmdLine, @"(?:\-b\s+|browsertrackerid:)(\d+)");
                             string TrackerID = TrackerMatch.Success ? TrackerMatch.Groups[1].Value : string.Empty;
 
                             // Only kill if TrackerID matches AND is not empty
@@ -681,7 +696,7 @@ namespace RBX_Alt_Manager
                         try
                         {
                             Process.Start(new ProcessStartInfo { FileName = fallbackUri, UseShellExecute = true });
-                            System.Threading.Thread.Sleep(3000);
+                            System.Threading.Thread.Sleep(500);
                             AccountManager.Instance.NextAccount();
                             _ = Task.Run(AdjustWindowPosition);
                         }
@@ -723,33 +738,43 @@ namespace RBX_Alt_Manager
                         Process RbxProcess = Process.Start(Roblox);
                         Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
 
-                        // Wait for Roblox window to appear (proves Byfron unpack & game engine started)
-                        if (RbxProcess != null && !RbxProcess.HasExited)
+                        // Minimal safe micro-stagger (400ms) to let process initialize handles
+                        await Task.Delay(400);
+
+                        // Signal launcher immediately: safe to proceed to next account!
+                        AccountManager.Instance.NextAccount();
+
+                        // Asynchronously track window and position in background without blocking launcher queue
+                        _ = Task.Run(async () =>
                         {
-                            DateTime timeout = DateTime.Now.AddSeconds(30);
-                            while (DateTime.Now < timeout)
+                            try
                             {
-                                try
+                                if (RbxProcess != null && !RbxProcess.HasExited)
                                 {
-                                    RbxProcess.Refresh();
-                                    if (RbxProcess.HasExited) break;
-                                    if (RbxProcess.MainWindowHandle != IntPtr.Zero)
+                                    DateTime timeout = DateTime.Now.AddSeconds(30);
+                                    while (DateTime.Now < timeout)
                                     {
-                                        Program.Logger.Info($"Roblox window appeared for {Username} (PID: {RbxProcess.Id})");
-                                        break;
+                                        try
+                                        {
+                                            RbxProcess.Refresh();
+                                            if (RbxProcess.HasExited) break;
+                                            if (RbxProcess.MainWindowHandle != IntPtr.Zero)
+                                            {
+                                                Program.Logger.Info($"Roblox window appeared for {Username} (PID: {RbxProcess.Id})");
+                                                break;
+                                            }
+                                        }
+                                        catch { break; }
+                                        await Task.Delay(150);
                                     }
                                 }
-                                catch { break; }
-                                await Task.Delay(250);
+                                AdjustWindowPosition();
                             }
-                        }
-
-                        // Give it a brief buffer for window stability before signaling next account
-                        await Task.Delay(500);
-
-                        // Signal launcher: safe to proceed to next account
-                        AccountManager.Instance.NextAccount();
-                        _ = Task.Run(AdjustWindowPosition);
+                            catch (Exception ex)
+                            {
+                                Program.Logger.Error($"Error in background window tracking for {Username}: {ex.Message}");
+                            }
+                        });
                     }
                     catch (Exception x)
                     {
@@ -758,7 +783,6 @@ namespace RBX_Alt_Manager
                         AccountManager.Instance.NextAccount();
                     }
                 });
-
 
                 return "Success";
             }

@@ -649,98 +649,97 @@ namespace RBX_Alt_Manager
                 double LaunchTime = Math.Floor((DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds * 1000);
 
                 // =====================================================
-                // MULTI-INSTANCE & MODERN ROBLOX LAUNCH FIX:
-                // Pass the protocol URI directly to RobloxPlayerBeta.exe
-                // (or via ShellExecute). DO NOT release ROBLOX_singletonMutex!
-                // Keeping the mutex held is what allows multiple instances.
+                // MULTI-INSTANCE FIX: Always use Direct EXE Launch
+                // with --app -t -j -b command-line arguments.
+                //
+                // DO NOT use roblox-player: protocol URI!
+                // The protocol handler goes through Roblox's launcher
+                // which enforces single-instance and KILLS previous windows.
+                //
+                // Flow: Release mutex → Launch EXE → Wait → Reacquire mutex
+                // This lets each Roblox instance create its own mutex handle,
+                // then RAM takes it back so the next instance also bypasses
+                // the singleton check.
                 // =====================================================
-                string joinPlaceLauncherUrl;
-                if (JoinVIP)
-                    joinPlaceLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&placeId={PlaceID}&accessCode={AccessCode}&linkCode={LinkCode}";
-                else if (FollowUser)
-                    joinPlaceLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestFollowUser&userId={PlaceID}";
-                else
-                    joinPlaceLauncherUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame{(string.IsNullOrEmpty(JobID) ? "" : "Job")}&browserTrackerId={BrowserTrackerID}&placeId={PlaceID}{(string.IsNullOrEmpty(JobID) ? "" : ("&gameId=" + JobID))}&isPlayTogetherGame=false{(AccountManager.IsTeleport ? "&isTeleport=true" : "")}";
-
-                string ProtocolUri = $"roblox-player:1+launchmode:play+gameinfo:{Ticket}+launchtime:{LaunchTime}+placelauncherurl:{HttpUtility.UrlEncode(joinPlaceLauncherUrl)}+browsertrackerid:{BrowserTrackerID}+robloxLocale:en_us+gameLocale:en_us+channel:";
-
                 string RPath = FindRobloxPlayerPath();
+
+                if (string.IsNullOrEmpty(RPath))
+                {
+                    Program.Logger.Error("Direct EXE not found, falling back to protocol launch");
+                    // Fallback: protocol launch (single-instance only)
+                    string joinUrl;
+                    if (JoinVIP)
+                        joinUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&placeId={PlaceID}&accessCode={AccessCode}&linkCode={LinkCode}";
+                    else if (FollowUser)
+                        joinUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestFollowUser&userId={PlaceID}";
+                    else
+                        joinUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame{(string.IsNullOrEmpty(JobID) ? "" : "Job")}&browserTrackerId={BrowserTrackerID}&placeId={PlaceID}{(string.IsNullOrEmpty(JobID) ? "" : ("&gameId=" + JobID))}&isPlayTogetherGame=false{(AccountManager.IsTeleport ? "&isTeleport=true" : "")}";
+
+                    string protocolUri = $"roblox-player:1+launchmode:play+gameinfo:{Ticket}+launchtime:{LaunchTime}+placelauncherurl:{HttpUtility.UrlEncode(joinUrl)}+browsertrackerid:{BrowserTrackerID}+robloxLocale:en_us+gameLocale:en_us+channel:";
+                    await Task.Run(() =>
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo { FileName = protocolUri, UseShellExecute = true });
+                            System.Threading.Thread.Sleep(3000);
+                            AccountManager.Instance.NextAccount();
+                            _ = Task.Run(AdjustWindowPosition);
+                        }
+                        catch (Exception x)
+                        {
+                            Utilities.InvokeIfRequired(AccountManager.Instance, () => MessageBox.Show($"ERROR: Failed to launch Roblox!\n\n{x.Message}", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Error));
+                            AccountManager.Instance.CancelLaunching();
+                            AccountManager.Instance.NextAccount();
+                        }
+                    });
+                    return "Success";
+                }
+
+                // Build join URL for -j argument
+                string joinScriptUrl;
+                if (JoinVIP)
+                    joinScriptUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&placeId={PlaceID}&accessCode={AccessCode}&linkCode={LinkCode}";
+                else if (FollowUser)
+                    joinScriptUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestFollowUser&userId={PlaceID}";
+                else
+                    joinScriptUrl = $"https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame{(string.IsNullOrEmpty(JobID) ? "" : "Job")}&browserTrackerId={BrowserTrackerID}&placeId={PlaceID}{(string.IsNullOrEmpty(JobID) ? "" : ("&gameId=" + JobID))}&isPlayTogetherGame=false{(AccountManager.IsTeleport ? "&isTeleport=true" : "")}";
 
                 await Task.Run(async () =>
                 {
                     try
                     {
-                        Process RbxProcess = null;
+                        // Step 1: Release singleton mutex so Roblox can create its own
+                        AccountManager.Instance.ReleaseMutexForLaunch();
 
-                        if (!string.IsNullOrEmpty(RPath) && File.Exists(RPath))
-                        {
-                            // Launch directly via RobloxPlayerBeta.exe with Protocol URI as argument
-                            ProcessStartInfo startInfo = new ProcessStartInfo
-                            {
-                                FileName = RPath,
-                                Arguments = ProtocolUri,
-                                UseShellExecute = false
-                            };
-                            RbxProcess = Process.Start(startInfo);
-                            Program.Logger.Info($"Directly started RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id})");
-                        }
-                        else
-                        {
-                            // Fallback to ShellExecute with the protocol URI
-                            ProcessStartInfo startInfo = new ProcessStartInfo
-                            {
-                                FileName = ProtocolUri,
-                                UseShellExecute = true
-                            };
-                            RbxProcess = Process.Start(startInfo);
-                            Program.Logger.Info($"Started Roblox protocol URI for {Username}");
-                        }
+                        // Step 2: Launch RobloxPlayerBeta.exe with --app -t -j -b flags
+                        ProcessStartInfo Roblox = new ProcessStartInfo(RPath);
+                        Roblox.UseShellExecute = false;
+                        Roblox.Arguments = $"--app -t {Ticket} -j \"{joinScriptUrl}\" -b {BrowserTrackerID} --launchtime={LaunchTime}";
 
+                        Process RbxProcess = Process.Start(Roblox);
+                        Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
 
-                        // Wait for Roblox window to appear BEFORE signaling next account.
-                        // Calling NextAccount() immediately after Process.Start causes Byfron
-                        // (Roblox Hyperion anti-cheat) to silently kill the 2nd instance because
-                        // the first hasn't fully initialized yet.
-                        if (RbxProcess != null)
-                        {
-                            DateTime winTimeout = DateTime.Now.AddSeconds(30);
-                            while (DateTime.Now < winTimeout)
-                            {
-                                try
-                                {
-                                    RbxProcess.Refresh();
-                                    if (RbxProcess.HasExited) break;
-                                    if (RbxProcess.MainWindowHandle != IntPtr.Zero)
-                                    {
-                                        Program.Logger.Info($"Roblox window opened for {Username} (PID: {RbxProcess.Id})");
-                                        _ = Task.Run(AdjustWindowPosition);
-                                        break;
-                                    }
-                                }
-                                catch { break; }
-                                await Task.Delay(350);
-                            }
-                        }
-                        else
-                        {
-                            // ShellExecute fallback: no process handle, wait a fixed time
-                            await Task.Delay(4000);
-                        }
+                        // Step 3: Wait for Roblox to start and create its own mutex handle
+                        await Task.Delay(1500);
 
-                        // Give Byfron 2 extra seconds to fully initialize before launching next account
-                        await Task.Delay(2000);
+                        // Step 4: Re-acquire the mutex so next instance also bypasses singleton
+                        AccountManager.Instance.ReacquireMutexAfterLaunch();
 
-                        // Signal launcher: this account has started, safe to proceed to next
+                        // Signal launcher: safe to proceed to next account
                         AccountManager.Instance.NextAccount();
-
+                        _ = Task.Run(AdjustWindowPosition);
                     }
                     catch (Exception x)
                     {
-                        Utilities.InvokeIfRequired(AccountManager.Instance, () => MessageBox.Show($"ERROR: Failed to launch Roblox!\n\n{x.Message}{x.StackTrace}", "Dino Multi-Roblox Manager", MessageBoxButtons.OK, MessageBoxIcon.Error));
+                        // Re-acquire mutex even on failure
+                        AccountManager.Instance.ReacquireMutexAfterLaunch();
+
+                        Utilities.InvokeIfRequired(AccountManager.Instance, () => MessageBox.Show($"ERROR: Failed to launch Roblox!\n\n{x.Message}{x.StackTrace}", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Error));
                         AccountManager.Instance.CancelLaunching();
                         AccountManager.Instance.NextAccount();
                     }
                 });
+
 
                 return "Success";
             }

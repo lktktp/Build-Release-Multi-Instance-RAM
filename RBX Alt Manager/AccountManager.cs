@@ -2272,18 +2272,68 @@ namespace RBX_Alt_Manager
 
             Program.Logger.Info($"[Multi-Launch] Starting launch for {Accounts.Count} accounts (AsyncJoin={AsyncJoin}, Delay={Delay}s)...");
 
+            if (AsyncJoin)
+            {
+                // =========================================================
+                // CONCURRENT LAUNCH (ผู้ใช้ขอเปิดพร้อมกัน / ไวๆ)
+                // Launches tasks in parallel but staggers them by 'Delay' seconds
+                // to avoid Byfron unpacking collision.
+                // =========================================================
+                var launchTasks = new List<Task>();
+                
+                for (int i = 0; i < Accounts.Count; i++)
+                {
+                    if (Token.IsCancellationRequested) break;
+                    
+                    Account account = Accounts[i];
+                    long PlaceId = PlaceID;
+                    string JobId = JobID;
+                    
+                    if (!FollowUser)
+                    {
+                        if (!string.IsNullOrEmpty(account.GetField("SavedPlaceId")) && long.TryParse(account.GetField("SavedPlaceId"), out long PID)) PlaceId = PID;
+                        if (!string.IsNullOrEmpty(account.GetField("SavedJobId"))) JobId = account.GetField("SavedJobId");
+                    }
+
+                    int index = i;
+                    launchTasks.Add(Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (index > 0)
+                            {
+                                int staggerMs = Math.Max(1500, Delay * 1000);
+                                await Task.Delay(index * staggerMs, Token.Token);
+                            }
+
+                            if (!Token.IsCancellationRequested)
+                            {
+                                Program.Logger.Info($"[Parallel Launch] Launching account {index + 1}/{Accounts.Count}: {account.Username}");
+                                string res = await account.JoinServer(PlaceId, JobId, FollowUser, VIPServer);
+                                if (!string.IsNullOrEmpty(res) && !res.Contains("Success"))
+                                {
+                                    Program.Logger.Error($"[Parallel Launch] Failed to launch {account.Username}: {res}");
+                                }
+                            }
+                        }
+                        catch (TaskCanceledException) { }
+                        catch (Exception ex)
+                        {
+                            Program.Logger.Error($"[Parallel Launch] Error launching {account.Username}: {ex.Message}");
+                        }
+                    }));
+                }
+
+                await Task.WhenAll(launchTasks);
+                Program.Logger.Info($"[Parallel Launch] Finished launching {Accounts.Count} accounts!");
+
+                Token.Cancel();
+                Token.Dispose();
+                return;
+            }
+
             // =====================================================================
-            // WINDOW-STABILIZED SEQUENTIAL LAUNCH (Byfron-safe)
-            //
-            // Byfron (Roblox Hyperion anti-cheat) silently kills a 2nd Roblox process
-            // if it starts unpacking while the 1st hasn't finished initializing.
-            //
-            // Solution: Account.JoinServer now calls NextAccount() only AFTER the
-            // Roblox window appears AND a 2-second stabilization buffer.
-            // LaunchAccounts waits for that NextAccount() signal before proceeding.
-            //
-            // AsyncJoin=true  → wait for window signal (auto-paced, fastest safe speed)
-            // AsyncJoin=false → fixed delay per Settings (default 3s minimum)
+            // WINDOW-STABILIZED SEQUENTIAL LAUNCH (Byfron-safe, ช้าแต่ชัวร์)
             // =====================================================================
             foreach (Account account in Accounts)
             {
@@ -2310,24 +2360,12 @@ namespace RBX_Alt_Manager
 
                 if (launchedCount < Accounts.Count) // Don't wait after the last account
                 {
-                    if (AsyncJoin)
+                    // Fixed-delay mode: wait configured delay (min 3s for Byfron safety)
+                    try
                     {
-                        // Window-stabilized mode: Account.JoinServer already called NextAccount()
-                        // after window appeared + 2s buffer. The signal should already be set.
-                        // Wait up to 35s in case of very slow machines, then continue anyway.
-                        DateTime asyncTimeout = DateTime.Now.AddSeconds(35);
-                        while (!LaunchNext && DateTime.Now < asyncTimeout && !Token.IsCancellationRequested)
-                            await Task.Delay(150);
+                        await Task.Delay(Math.Max(3000, Delay * 1000), Token.Token);
                     }
-                    else
-                    {
-                        // Fixed-delay mode: wait configured delay (min 3s for Byfron safety)
-                        try
-                        {
-                            await Task.Delay(Math.Max(3000, Delay * 1000), Token.Token);
-                        }
-                        catch (TaskCanceledException) { break; }
-                    }
+                    catch (TaskCanceledException) { break; }
                 }
 
                 LaunchNext = false;
@@ -2340,6 +2378,7 @@ namespace RBX_Alt_Manager
             Token.Cancel();
             Token.Dispose();
         }
+
 
         public void NextAccount() => LaunchNext = true;
         public void CancelLaunching()

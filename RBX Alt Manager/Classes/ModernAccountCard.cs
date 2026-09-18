@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -10,38 +11,41 @@ using System.Windows.Forms;
 namespace RBX_Alt_Manager.Classes
 {
     /// <summary>
-    /// Modern dark-gaming style account row card.
-    /// Public API (constructor, properties, events) is unchanged from the
-    /// previous implementation so existing wiring in AccountManager keeps working.
+    /// Modern Dark-Gaming account row card matching UI_MOCKUP_REFERENCE.png.
+    /// 82px tall, 12px rounded corners, 52px circular avatar, status dot,
+    /// username + pill badge, alias + uid rows, blue play btn, grey copy/more btns.
+    /// Public API (constructor, CardClicked, PlayClicked, CopyClicked, MoreClicked) unchanged.
     /// </summary>
     public class ModernAccountCard : Control
     {
-        // ---- Design tokens (Dark Gaming palette) --------------------------------
-        private static readonly Color BgIdle = Color.FromArgb(15, 20, 34);      // #0F1422
-        private static readonly Color BgHover = Color.FromArgb(20, 27, 45);     // #141B2D
-        private static readonly Color BgSelected = Color.FromArgb(22, 32, 54);  // #162036
-        private static readonly Color BorderIdle = Color.FromArgb(30, 41, 59);   // #1E293B
-        private static readonly Color BorderHover = Color.FromArgb(51, 65, 85);  // #334155
-        private static readonly Color BorderSelected = Color.FromArgb(37, 99, 235); // #2563EB primary accent
-        private static readonly Color AccentPrimary = Color.FromArgb(37, 99, 235);  // #2563EB
-        private static readonly Color AccentPrimaryHover = Color.FromArgb(59, 130, 246); // #3B82F6
-        private static readonly Color OnlineGreen = Color.FromArgb(34, 197, 94);   // #22C55E
-        private static readonly Color OnlineGreenBg = Color.FromArgb(6, 78, 59);   // pill background
-        private static readonly Color OnlineGreenFg = Color.FromArgb(74, 222, 128);
-        private static readonly Color OfflineGray = Color.FromArgb(100, 116, 139); // #64748B
-        private static readonly Color TextPrimary = Color.FromArgb(248, 250, 252); // #F8FAFC
-        private static readonly Color TextSecondary = Color.FromArgb(148, 163, 184); // #94A3B8
-        private static readonly Color TextMuted = Color.FromArgb(100, 116, 139);   // #64748B
-        private static readonly Color SurfaceSubtle = Color.FromArgb(30, 41, 59);  // secondary button bg
-        private static readonly Color SurfaceSubtleHover = Color.FromArgb(51, 65, 85);
+        // -- Design Tokens -------------------------------------------------------
+        private static readonly Color BgIdle         = Color.FromArgb(17, 24, 39);
+        private static readonly Color BgHover        = Color.FromArgb(22, 30, 50);
+        private static readonly Color BgSelected     = Color.FromArgb(20, 30, 54);
+        private static readonly Color BorderIdle      = Color.FromArgb(31, 41, 55);
+        private static readonly Color BorderHover     = Color.FromArgb(55, 65, 81);
+        private static readonly Color BorderSelected  = Color.FromArgb(37, 99, 235);
+        private static readonly Color AccentBlue      = Color.FromArgb(37, 99, 235);
+        private static readonly Color AccentBlueHover = Color.FromArgb(59, 130, 246);
+        private static readonly Color OnlineGreen     = Color.FromArgb(34, 197, 94);
+        private static readonly Color OnlinePillBg    = Color.FromArgb(6, 78, 59);
+        private static readonly Color OnlinePillFg    = Color.FromArgb(74, 222, 128);
+        private static readonly Color OfflineGray     = Color.FromArgb(100, 116, 139);
+        private static readonly Color OfflinePillBg   = Color.FromArgb(30, 41, 59);
+        private static readonly Color OfflinePillFg   = Color.FromArgb(148, 163, 184);
+        private static readonly Color TextPrimary     = Color.FromArgb(248, 250, 252);
+        private static readonly Color TextSecondary   = Color.FromArgb(148, 163, 184);
+        private static readonly Color TextMuted       = Color.FromArgb(100, 116, 139);
+        private static readonly Color SurfaceBtn      = Color.FromArgb(30, 41, 59);
+        private static readonly Color SurfaceBtnHvr   = Color.FromArgb(51, 65, 85);
 
         public static readonly Dictionary<long, Image> AvatarCache = new Dictionary<long, Image>();
 
-        public Account Account { get; private set; }
-        public bool HideUsername { get; set; }
+        public Account Account   { get; private set; }
+        private CheckBox chkSelect;
+        private bool _suppressCheckEvent;
+        private bool _isSelected;
 
-        // Selection state — synced with chkSelect CheckBox
-        private bool _isSelected = false;
         public bool IsSelected
         {
             get => _isSelected;
@@ -49,101 +53,82 @@ namespace RBX_Alt_Manager.Classes
             {
                 _isSelected = value;
                 if (chkSelect != null && chkSelect.Checked != value)
+                {
+                    _suppressCheckEvent = true;
                     chkSelect.Checked = value;
-                this.Invalidate();
+                    _suppressCheckEvent = false;
+                }
             }
         }
+
+        public bool HideUsername { get; set; }
 
         public event EventHandler<Account> CardClicked;
         public event EventHandler<Account> PlayClicked;
         public event EventHandler<Account> CopyClicked;
-        public event EventHandler<Point> MoreClicked;
-        /// <summary>Fires when the checkbox changes state. bool = isChecked</summary>
-        public event EventHandler<bool> SelectionToggled;
+        public event EventHandler<Point>   MoreClicked;
+        public event EventHandler<bool>    SelectionToggled;
 
-        // Visible CheckBox for multi-account selection
-        public CheckBox chkSelect;
-
-        private bool isHovered = false;
-        private bool isPlayHovered = false;
-        private bool isCopyHovered = false;
-        private bool isMoreHovered = false;
-
-        private Rectangle playRect;
-        private Rectangle copyRect;
-        private Rectangle moreRect;
-
-        private readonly ToolTip toolTip = new ToolTip
+        public void RefreshPresenceDisplay()
         {
-            AutoPopDelay = 4000,
-            InitialDelay = 400,
-            ReshowDelay = 200,
-            ShowAlways = true
+            _UpdateAccessible();
+            Invalidate();
+        }
+
+        private bool _hovered, _playHov, _copyHov, _moreHov;
+        private Rectangle _playRect, _copyRect, _moreRect;
+
+        private readonly ToolTip _tip = new ToolTip
+        {
+            AutoPopDelay = 4000, InitialDelay = 400, ReshowDelay = 200, ShowAlways = true
         };
 
         public ModernAccountCard(Account account)
         {
-            this.Account = account;
-            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
-                           ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            this.DoubleBuffered = true;
-            this.Height = 80; // slightly taller for comfortable 40px+ touch targets
-            this.Cursor = Cursors.Hand;
-            this.Margin = new Padding(0, 0, 0, 8);
-            this.TabStop = true;
-            this.AccessibleRole = System.Windows.Forms.AccessibleRole.ListItem;
+            Account = account;
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.UserPaint            |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw, true);
+            DoubleBuffered = true;
+            Height         = 82;
+            Cursor         = Cursors.Hand;
+            Margin         = new Padding(0, 0, 0, 6);
+            TabStop        = true;
+            AccessibleRole = AccessibleRole.ListItem;
 
-            // Selection CheckBox — top-left corner, transparent background
             chkSelect = new CheckBox
             {
-                Size = new Size(20, 20),
-                Location = new Point(8, 30),
+                Location = new Point(12, 31),
+                Size = new Size(18, 18),
                 BackColor = Color.Transparent,
-                Cursor = Cursors.Hand,
-                TabStop = false
+                Cursor = Cursors.Hand
             };
             chkSelect.CheckedChanged += (s, e) =>
             {
+                if (_suppressCheckEvent) return;
                 _isSelected = chkSelect.Checked;
-                this.Invalidate();
                 SelectionToggled?.Invoke(this, chkSelect.Checked);
+                Invalidate();
             };
-            this.Controls.Add(chkSelect);
+            Controls.Add(chkSelect);
 
-            UpdateAccessibleName();
-            LoadAvatarAsync();
+            _UpdateAccessible();
+            _LoadAvatarAsync();
         }
 
-        /// <summary>
-        /// Call this to repaint the card when the account's online/offline presence changes.
-        /// Safe to call from a background thread — marshals to UI thread automatically.
-        /// </summary>
-        public void RefreshPresenceDisplay()
-        {
-            if (IsDisposed) return;
-            try
-            {
-                if (this.InvokeRequired)
-                    this.BeginInvoke((MethodInvoker)(() => { if (!IsDisposed) this.Invalidate(); }));
-                else
-                    this.Invalidate();
-            }
-            catch { }
-        }
-
-
-        private void UpdateAccessibleName()
+        private void _UpdateAccessible()
         {
             if (Account == null) return;
-            bool isOnline = Account.Presence != null && Account.Presence.userPresenceType != UserPresenceType.Offline;
-            this.AccessibleName = $"{Account.Username}, {(isOnline ? "ออนไลน์" : "ออฟไลน์")}";
+            bool online = Account.Presence != null && Account.Presence.userPresenceType != UserPresenceType.Offline;
+            AccessibleName = Account.Username + (online ? " [online]" : " [offline]");
         }
 
-        private void LoadAvatarAsync()
+        private void _LoadAvatarAsync()
         {
             if (Account == null || Account.UserID <= 0) return;
             if (AvatarCache.ContainsKey(Account.UserID)) return;
-
             Task.Run(async () =>
             {
                 try
@@ -151,340 +136,258 @@ namespace RBX_Alt_Manager.Classes
                     string url = await Batch.GetImage(Account.UserID, "AvatarHeadShot", "150x150");
                     if (!string.IsNullOrEmpty(url))
                     {
-                        using (HttpClient client = new HttpClient())
+                        using (HttpClient http = new HttpClient())
                         {
-                            byte[] data = await client.GetByteArrayAsync(url);
-                            using (MemoryStream ms = new MemoryStream(data))
+                            byte[] data = await http.GetByteArrayAsync(url);
+                            using (var ms = new MemoryStream(data))
                             {
                                 Image img = Image.FromStream(ms);
-                                lock (AvatarCache)
-                                {
-                                    AvatarCache[Account.UserID] = img;
-                                }
-
-                                if (!IsDisposed)
-                                {
-                                    this.BeginInvoke((MethodInvoker)delegate { this.Invalidate(); });
-                                }
+                                lock (AvatarCache) { AvatarCache[Account.UserID] = img; }
+                                if (!IsDisposed) BeginInvoke((MethodInvoker)Invalidate);
                             }
                         }
                     }
                 }
-                catch { /* avatar is best-effort; initials fallback is drawn instead */ }
+                catch { }
             });
         }
 
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            // Larger action buttons (>=36px) to meet comfortable touch-target guidance.
-            int btnSize = 36;
-            int btnY = (Height - btnSize) / 2;
-            moreRect = new Rectangle(Width - 16 - btnSize, btnY, btnSize, btnSize);
-            copyRect = new Rectangle(moreRect.X - 8 - btnSize, btnY, btnSize, btnSize);
-            playRect = new Rectangle(copyRect.X - 8 - 42, btnY, 42, btnSize);
-
-            toolTip.SetToolTip(this, null);
+            int btnH = 36, btnW = 36, playW = 42, btnY = (Height - btnH) / 2;
+            _moreRect = new Rectangle(Width - 14 - btnW, btnY, btnW, btnH);
+            _copyRect = new Rectangle(_moreRect.X - 8 - btnW, btnY, btnW, btnH);
+            _playRect = new Rectangle(_copyRect.X - 8 - playW, btnY, playW, btnH);
+            _tip.SetToolTip(this, null);
             Invalidate();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            bool oldPlay = isPlayHovered;
-            bool oldCopy = isCopyHovered;
-            bool oldMore = isMoreHovered;
-
-            isPlayHovered = playRect.Contains(e.Location);
-            isCopyHovered = copyRect.Contains(e.Location);
-            isMoreHovered = moreRect.Contains(e.Location);
-
-            if (isPlayHovered) toolTip.SetToolTip(this, "เข้าเกม (Launch)");
-            else if (isCopyHovered) toolTip.SetToolTip(this, "คัดลอกข้อมูลบัญชี");
-            else if (isMoreHovered) toolTip.SetToolTip(this, "ตัวเลือกเพิ่มเติม");
-            else toolTip.SetToolTip(this, null);
-
-            if (oldPlay != isPlayHovered || oldCopy != isCopyHovered || oldMore != isMoreHovered)
-                Invalidate();
+            bool op = _playHov, oc = _copyHov, om = _moreHov;
+            _playHov = _playRect.Contains(e.Location);
+            _copyHov = _copyRect.Contains(e.Location);
+            _moreHov = _moreRect.Contains(e.Location);
+            if      (_playHov) _tip.SetToolTip(this, "Quick Launch");
+            else if (_copyHov) _tip.SetToolTip(this, "Copy Cookie");
+            else if (_moreHov) _tip.SetToolTip(this, "More Options");
+            else               _tip.SetToolTip(this, null);
+            if (op != _playHov || oc != _copyHov || om != _moreHov) Invalidate();
         }
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hovered = true;  Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hovered = _playHov = _copyHov = _moreHov = false; Invalidate(); }
+        protected override void OnGotFocus(EventArgs e)   { base.OnGotFocus(e);  Invalidate(); }
+        protected override void OnLostFocus(EventArgs e)  { base.OnLostFocus(e); Invalidate(); }
 
-        protected override void OnMouseEnter(EventArgs e)
+        protected override bool IsInputKey(Keys k)
         {
-            base.OnMouseEnter(e);
-            isHovered = true;
-            Invalidate();
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            base.OnMouseLeave(e);
-            isHovered = false;
-            isPlayHovered = false;
-            isCopyHovered = false;
-            isMoreHovered = false;
-            Invalidate();
-        }
-
-        protected override void OnGotFocus(EventArgs e)
-        {
-            base.OnGotFocus(e);
-            Invalidate();
-        }
-
-        protected override void OnLostFocus(EventArgs e)
-        {
-            base.OnLostFocus(e);
-            Invalidate();
-        }
-
-        protected override bool IsInputKey(Keys keyData)
-        {
-            if (keyData == Keys.Enter || keyData == Keys.Space) return true;
-            return base.IsInputKey(keyData);
+            if (k == Keys.Enter || k == Keys.Space) return true;
+            return base.IsInputKey(k);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            // Keyboard access: Enter selects, Space launches — mirrors mouse click behavior.
-            if (e.KeyCode == Keys.Enter)
-                CardClicked?.Invoke(this, Account);
-            else if (e.KeyCode == Keys.Space)
-                PlayClicked?.Invoke(this, Account);
+            if (e.KeyCode == Keys.Enter) CardClicked?.Invoke(this, Account);
+            if (e.KeyCode == Keys.Space) PlayClicked?.Invoke(this, Account);
         }
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
-            this.Focus();
-
-            if (e.Button == MouseButtons.Right)
-            {
-                MoreClicked?.Invoke(this, this.PointToScreen(e.Location));
-                return;
-            }
-
-            if (playRect.Contains(e.Location))
-                PlayClicked?.Invoke(this, Account);
-            else if (copyRect.Contains(e.Location))
-                CopyClicked?.Invoke(this, Account);
-            else if (moreRect.Contains(e.Location))
-                MoreClicked?.Invoke(this, this.PointToScreen(new Point(moreRect.Left, moreRect.Bottom)));
-            else
-                CardClicked?.Invoke(this, Account);
+            Focus();
+            if (e.Button == MouseButtons.Right) { MoreClicked?.Invoke(this, PointToScreen(e.Location)); return; }
+            if      (_playRect.Contains(e.Location)) PlayClicked?.Invoke(this, Account);
+            else if (_copyRect.Contains(e.Location)) CopyClicked?.Invoke(this, Account);
+            else if (_moreRect.Contains(e.Location)) MoreClicked?.Invoke(this, PointToScreen(new Point(_moreRect.Left, _moreRect.Bottom)));
+            else                                     CardClicked?.Invoke(this, Account);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-
+            g.SmoothingMode     = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             Rectangle bounds = new Rectangle(1, 1, Width - 3, Height - 3);
-
-            Color bgColor = IsSelected ? BgSelected : (isHovered ? BgHover : BgIdle);
-            Color borderColor = IsSelected ? BorderSelected : (isHovered ? BorderHover : BorderIdle);
-            int borderWidth = IsSelected ? 2 : 1;
-
-            using (GraphicsPath path = GetRoundedRectangle(bounds, 12))
+            Color bg  = IsSelected ? BgSelected : (_hovered ? BgHover : BgIdle);
+            Color brd = IsSelected ? BorderSelected : (_hovered ? BorderHover : BorderIdle);
+            int   bw  = IsSelected ? 2 : 1;
+            using (GraphicsPath gp = GetRoundedRectangle(bounds, 12))
             {
-                using (SolidBrush bgBrush = new SolidBrush(bgColor))
-                    g.FillPath(bgBrush, path);
-
-                using (Pen borderPen = new Pen(borderColor, borderWidth))
-                    g.DrawPath(borderPen, path);
+                using (SolidBrush b = new SolidBrush(bg)) g.FillPath(b, gp);
+                using (Pen p = new Pen(brd, bw))          g.DrawPath(p, gp);
             }
-
-            // Keyboard focus ring (accessibility requirement — never remove focus indication)
-            if (this.Focused)
+            if (Focused)
             {
-                using (GraphicsPath focusPath = GetRoundedRectangle(bounds, 12))
-                using (Pen focusPen = new Pen(Color.FromArgb(140, AccentPrimaryHover), 1.5f) { DashStyle = DashStyle.Dot })
-                    g.DrawPath(focusPen, focusPath);
+                using (GraphicsPath fp = GetRoundedRectangle(bounds, 12))
+                using (Pen pen = new Pen(Color.FromArgb(160, AccentBlueHover), 1.5f) { DashStyle = DashStyle.Dot })
+                    g.DrawPath(pen, fp);
             }
-
-            // ---- Avatar ---------------------------------------------------------
-            int avatarSize = 48;
-            int avatarX = 16;
-            int avatarY = (Height - avatarSize) / 2;
-            Rectangle avatarRect = new Rectangle(avatarX, avatarY, avatarSize, avatarSize);
-
-            using (GraphicsPath clipPath = new GraphicsPath())
+            if (IsSelected)
             {
-                clipPath.AddEllipse(avatarRect);
-                g.SetClip(clipPath);
+                using (SolidBrush ab = new SolidBrush(AccentBlue))
+                    g.FillRectangle(ab, new Rectangle(1, 10, 3, Height - 20));
+            }
+            int avSz = 52, avX = 38, avY = (Height - avSz) / 2;
+            Rectangle avRect = new Rectangle(avX, avY, avSz, avSz);
+            _DrawAvatar(g, avRect, bg);
+            bool online = Account?.Presence != null && Account.Presence.userPresenceType != UserPresenceType.Offline;
+            _DrawStatusDot(g, avRect, online, bg);
+            int txtX = avX + avSz + 14, txtY = 12;
+            string uname = (Account != null) ? (HideUsername ? "........" : Account.Username) : "Unknown";
+            using (Font uf = new Font("Segoe UI", 11f, FontStyle.Bold))
+            using (SolidBrush ub = new SolidBrush(TextPrimary))
+            {
+                g.DrawString(uname, uf, ub, txtX, txtY);
+                SizeF us = g.MeasureString(uname, uf);
+                _DrawPill(g, online, (int)(txtX + us.Width + 6), txtY + 2);
+            }
+            string alias = "Alias:  " + (!string.IsNullOrEmpty(Account?.Alias) ? Account.Alias : "-");
+            using (Font af = new Font("Segoe UI", 8.75f))
+            using (SolidBrush asb = new SolidBrush(TextSecondary))
+                g.DrawString(alias, af, asb, txtX, txtY + 26);
+            string uid = Account?.UserID > 0 ? Account.UserID.ToString() : "-";
+            using (Font idf = new Font("Segoe UI", 8.75f))
+            using (SolidBrush idb = new SolidBrush(TextMuted))
+                g.DrawString(uid, idf, idb, txtX, txtY + 44);
+            _DrawPlayBtn(g);
+            _DrawCopyBtn(g);
+            _DrawMoreBtn(g);
+        }
 
-                Image avatarImg = null;
-                if (Account != null && AvatarCache.TryGetValue(Account.UserID, out Image cached))
-                    avatarImg = cached;
-
-                if (avatarImg != null)
+        private void _DrawAvatar(Graphics g, Rectangle r, Color cardBg)
+        {
+            using (GraphicsPath clip = new GraphicsPath())
+            {
+                clip.AddEllipse(r);
+                g.SetClip(clip);
+                Image img = null;
+                if (Account != null) AvatarCache.TryGetValue(Account.UserID, out img);
+                if (img != null)
                 {
-                    g.DrawImage(avatarImg, avatarRect);
+                    g.DrawImage(img, r);
                 }
                 else
                 {
-                    using (SolidBrush pBrush = new SolidBrush(SurfaceSubtle))
-                        g.FillRectangle(pBrush, avatarRect);
-
-                    string initial = (Account != null && !string.IsNullOrEmpty(Account.Username)) ? Account.Username.Substring(0, 1).ToUpper() : "?";
-                    using (Font initialFont = new Font("Segoe UI", 17f, FontStyle.Bold))
-                    using (SolidBrush tBrush = new SolidBrush(TextSecondary))
+                    using (SolidBrush fb = new SolidBrush(Color.FromArgb(30, 41, 59)))
+                        g.FillEllipse(fb, r);
+                    string ch = (Account != null && !string.IsNullOrEmpty(Account.Username))
+                        ? Account.Username.Substring(0, 1).ToUpper() : "?";
+                    using (Font f = new Font("Segoe UI", 18f, FontStyle.Bold))
+                    using (SolidBrush b = new SolidBrush(TextSecondary))
                     {
-                        SizeF s = g.MeasureString(initial, initialFont);
-                        g.DrawString(initial, initialFont, tBrush, avatarX + (avatarSize - s.Width) / 2, avatarY + (avatarSize - s.Height) / 2);
+                        SizeF sz = g.MeasureString(ch, f);
+                        g.DrawString(ch, f, b, r.X + (r.Width - sz.Width) / 2f, r.Y + (r.Height - sz.Height) / 2f);
                     }
                 }
                 g.ResetClip();
             }
-
-            using (Pen aPen = new Pen(BorderHover, 1.5f))
-                g.DrawEllipse(aPen, avatarRect);
-
-            // Status Indicator Dot
-            bool isOnline = (Account?.Presence != null && Account.Presence.userPresenceType != UserPresenceType.Offline);
-            Color statusColor = isOnline ? OnlineGreen : OfflineGray;
-            Rectangle statusDotRect = new Rectangle(avatarX + avatarSize - 13, avatarY + avatarSize - 13, 14, 14);
-
-            using (SolidBrush dotBg = new SolidBrush(bgColor))
-                g.FillEllipse(dotBg, new Rectangle(statusDotRect.X - 2, statusDotRect.Y - 2, statusDotRect.Width + 4, statusDotRect.Height + 4));
-
-            using (SolidBrush dotBrush = new SolidBrush(statusColor))
-                g.FillEllipse(dotBrush, statusDotRect);
-
-            // ---- Text info --------------------------------------------------------
-            int textX = avatarX + avatarSize + 16;
-            int textY = 14;
-
-            string uname = (Account != null) ? (HideUsername ? "••••••••" : Account.Username) : "Unknown";
-            using (Font uFont = new Font("Segoe UI", 11f, FontStyle.Bold))
-            using (SolidBrush uBrush = new SolidBrush(TextPrimary))
-            {
-                g.DrawString(uname, uFont, uBrush, textX, textY);
-                SizeF uSize = g.MeasureString(uname, uFont);
-
-                // Online/Offline pill badge
-                int badgeX = textX + (int)uSize.Width + 10;
-                int badgeY = textY + 1;
-                string statusText = isOnline ? "ออนไลน์" : "ออฟไลน์";
-                Color badgeBg = isOnline ? OnlineGreenBg : SurfaceSubtle;
-                Color badgeFg = isOnline ? OnlineGreenFg : TextSecondary;
-
-                using (Font badgeFont = new Font("Segoe UI", 7.5f, FontStyle.Bold))
-                {
-                    SizeF bSize = g.MeasureString(statusText, badgeFont);
-                    Rectangle bRect = new Rectangle(badgeX, badgeY, (int)bSize.Width + 18, 19);
-
-                    using (GraphicsPath bPath = GetRoundedRectangle(bRect, 9))
-                    using (SolidBrush bBg = new SolidBrush(badgeBg))
-                    using (SolidBrush bText = new SolidBrush(badgeFg))
-                    using (SolidBrush dot = new SolidBrush(isOnline ? OnlineGreen : TextSecondary))
-                    {
-                        g.FillPath(bBg, bPath);
-                        g.FillEllipse(dot, badgeX + 6, badgeY + 6, 5, 5);
-                        g.DrawString(statusText, badgeFont, bText, badgeX + 15, badgeY + 2);
-                    }
-                }
-            }
-
-            // Alias row
-            string aliasText = "Alias: " + (!string.IsNullOrEmpty(Account?.Alias) ? Account.Alias : "-");
-            using (Font subFont = new Font("Segoe UI", 8.75f, FontStyle.Regular))
-            using (SolidBrush subBrush = new SolidBrush(TextSecondary))
-            {
-                g.DrawString(aliasText, subFont, subBrush, textX, textY + 24);
-            }
-
-            // User ID row
-            string idText = "ID: " + (Account?.UserID > 0 ? Account.UserID.ToString() : "-");
-            using (Font idFont = new Font("Segoe UI", 8.75f, FontStyle.Regular))
-            using (SolidBrush idBrush = new SolidBrush(TextMuted))
-            {
-                g.DrawString(idText, idFont, idBrush, textX, textY + 43);
-            }
-
-            // ---- Action buttons -----------------------------------------------
-            DrawPlayButton(g);
-            DrawCopyButton(g);
-            DrawMoreButton(g);
+            using (Pen ring = new Pen(Color.FromArgb(45, 55, 72), 1.5f))
+                g.DrawEllipse(ring, r);
         }
 
-        private void DrawPlayButton(Graphics g)
+        private void _DrawStatusDot(Graphics g, Rectangle avRect, bool online, Color bg)
         {
-            Color pBg = isPlayHovered ? AccentPrimaryHover : AccentPrimary;
-            using (GraphicsPath path = GetRoundedRectangle(playRect, 8))
-            {
-                using (SolidBrush brush = new SolidBrush(pBg))
-                    g.FillPath(brush, path);
-
-                int cx = playRect.X + playRect.Width / 2;
-                int cy = playRect.Y + playRect.Height / 2;
-                Point[] triangle = new Point[] { new Point(cx - 4, cy - 6), new Point(cx + 6, cy), new Point(cx - 4, cy + 6) };
-                using (SolidBrush iconBrush = new SolidBrush(Color.White))
-                    g.FillPolygon(iconBrush, triangle);
-            }
+            int ds = 13;
+            Rectangle dot = new Rectangle(avRect.Right - ds, avRect.Bottom - ds, ds, ds);
+            using (SolidBrush halo = new SolidBrush(bg))
+                g.FillEllipse(halo, new Rectangle(dot.X - 2, dot.Y - 2, dot.Width + 4, dot.Height + 4));
+            using (SolidBrush db = new SolidBrush(online ? OnlineGreen : OfflineGray))
+                g.FillEllipse(db, dot);
+            using (SolidBrush hl = new SolidBrush(Color.FromArgb(60, 255, 255, 255)))
+                g.FillEllipse(hl, new Rectangle(dot.X + 2, dot.Y + 1, 5, 4));
         }
 
-        private void DrawCopyButton(Graphics g)
+        private void _DrawPill(Graphics g, bool online, int x, int y)
         {
-            Color cBg = isCopyHovered ? SurfaceSubtleHover : SurfaceSubtle;
-            using (GraphicsPath path = GetRoundedRectangle(copyRect, 8))
+            string txt = online ? "online" : "offline";
+            Color pbg  = online ? OnlinePillBg : OfflinePillBg;
+            Color pfg  = online ? OnlinePillFg : OfflinePillFg;
+            using (Font pf = new Font("Segoe UI", 7.5f, FontStyle.Bold))
             {
-                using (SolidBrush brush = new SolidBrush(cBg))
-                    g.FillPath(brush, path);
-
-                int cx = copyRect.X + copyRect.Width / 2;
-                int cy = copyRect.Y + copyRect.Height / 2;
-                using (Pen iconPen = new Pen(Color.FromArgb(203, 213, 225), 1.5f))
+                SizeF sz = g.MeasureString(txt, pf);
+                Rectangle pr = new Rectangle(x, y, (int)sz.Width + 16, 18);
+                using (GraphicsPath pp = GetRoundedRectangle(pr, 9))
+                using (SolidBrush bb  = new SolidBrush(pbg))
+                using (SolidBrush tb  = new SolidBrush(pfg))
                 {
-                    g.DrawRectangle(iconPen, cx - 3, cy - 6, 9, 9);
-                    using (SolidBrush fBrush = new SolidBrush(cBg))
-                        g.FillRectangle(fBrush, cx - 6, cy - 3, 9, 9);
-                    g.DrawRectangle(iconPen, cx - 6, cy - 3, 9, 9);
+                    g.FillPath(bb, pp);
+                    using (SolidBrush dot = new SolidBrush(online ? OnlineGreen : OfflineGray))
+                        g.FillEllipse(dot, x + 5, y + 6, 5, 5);
+                    g.DrawString(txt, pf, tb, x + 13, y + 2);
                 }
             }
         }
 
-        private void DrawMoreButton(Graphics g)
+        private void _DrawPlayBtn(Graphics g)
         {
-            Color mBg = isMoreHovered ? SurfaceSubtleHover : SurfaceSubtle;
-            using (GraphicsPath path = GetRoundedRectangle(moreRect, 8))
-            {
-                using (SolidBrush brush = new SolidBrush(mBg))
-                    g.FillPath(brush, path);
+            Color bg = _playHov ? AccentBlueHover : AccentBlue;
+            using (GraphicsPath p = GetRoundedRectangle(_playRect, 8))
+            using (SolidBrush b  = new SolidBrush(bg))
+                g.FillPath(b, p);
+            int cx = _playRect.X + _playRect.Width / 2 + 1;
+            int cy = _playRect.Y + _playRect.Height / 2;
+            Point[] tri = { new Point(cx - 5, cy - 7), new Point(cx + 7, cy), new Point(cx - 5, cy + 7) };
+            using (SolidBrush wb = new SolidBrush(Color.White))
+                g.FillPolygon(wb, tri);
+        }
 
-                int cx = moreRect.X + moreRect.Width / 2;
-                int cy = moreRect.Y + moreRect.Height / 2;
-                using (SolidBrush dotBrush = new SolidBrush(Color.FromArgb(203, 213, 225)))
-                {
-                    g.FillEllipse(dotBrush, cx - 7, cy - 1, 3, 3);
-                    g.FillEllipse(dotBrush, cx - 1, cy - 1, 3, 3);
-                    g.FillEllipse(dotBrush, cx + 5, cy - 1, 3, 3);
-                }
+        private void _DrawCopyBtn(Graphics g)
+        {
+            Color bg = _copyHov ? SurfaceBtnHvr : SurfaceBtn;
+            using (GraphicsPath p = GetRoundedRectangle(_copyRect, 8))
+            {
+                using (SolidBrush b = new SolidBrush(bg))          g.FillPath(b, p);
+                using (Pen bd = new Pen(Color.FromArgb(55, 65, 81), 1f)) g.DrawPath(bd, p);
+            }
+            int cx = _copyRect.X + _copyRect.Width / 2;
+            int cy = _copyRect.Y + _copyRect.Height / 2;
+            using (Pen ip = new Pen(Color.FromArgb(203, 213, 225), 1.5f))
+            {
+                g.DrawRectangle(ip, cx - 2, cy - 7, 9, 9);
+                using (SolidBrush fb = new SolidBrush(bg)) g.FillRectangle(fb, cx - 6, cy - 3, 9, 9);
+                g.DrawRectangle(ip, cx - 6, cy - 3, 9, 9);
             }
         }
 
-        public static GraphicsPath GetRoundedRectangle(Rectangle rect, int radius)
+        private void _DrawMoreBtn(Graphics g)
         {
-            GraphicsPath path = new GraphicsPath();
+            Color bg = _moreHov ? SurfaceBtnHvr : SurfaceBtn;
+            using (GraphicsPath p = GetRoundedRectangle(_moreRect, 8))
+            {
+                using (SolidBrush b = new SolidBrush(bg))          g.FillPath(b, p);
+                using (Pen bd = new Pen(Color.FromArgb(55, 65, 81), 1f)) g.DrawPath(bd, p);
+            }
+            int cx = _moreRect.X + _moreRect.Width / 2;
+            int cy = _moreRect.Y + _moreRect.Height / 2;
+            using (SolidBrush db = new SolidBrush(Color.FromArgb(203, 213, 225)))
+            {
+                g.FillEllipse(db, cx - 8, cy - 2, 4, 4);
+                g.FillEllipse(db, cx - 2, cy - 2, 4, 4);
+                g.FillEllipse(db, cx + 4, cy - 2, 4, 4);
+            }
+        }
+
+        public static GraphicsPath GetRoundedRectangle(Rectangle r, int radius)
+        {
             int d = radius * 2;
-            if (d > rect.Width) d = rect.Width;
-            if (d > rect.Height) d = rect.Height;
-
-            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
+            if (d > r.Width)  d = r.Width;
+            if (d > r.Height) d = r.Height;
+            GraphicsPath gp = new GraphicsPath();
+            gp.AddArc(r.X,         r.Y,          d, d, 180, 90);
+            gp.AddArc(r.Right - d, r.Y,          d, d, 270, 90);
+            gp.AddArc(r.Right - d, r.Bottom - d, d, d,   0, 90);
+            gp.AddArc(r.X,         r.Bottom - d, d, d,  90, 90);
+            gp.CloseFigure();
+            return gp;
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                toolTip?.Dispose();
-            }
+            if (disposing) _tip?.Dispose();
             base.Dispose(disposing);
         }
     }

@@ -708,18 +708,18 @@ namespace RBX_Alt_Manager
                 {
                     try
                     {
-                        // Step 1: Release singleton mutex so Roblox can create its own
-                        AccountManager.Instance.ReleaseMutexForLaunch();
+                        // Ensure Multi-Roblox mutex is held BEFORE launch
+                        AccountManager.Instance.EnsureMultiMutexHealthy();
 
-                        // Step 2: Launch RobloxPlayerBeta.exe with --app -t -j -b flags
+                        // Launch RobloxPlayerBeta.exe directly with -t -j -b flags (NO --app, so it does not reuse window)
                         ProcessStartInfo Roblox = new ProcessStartInfo(RPath);
                         Roblox.UseShellExecute = false;
-                        Roblox.Arguments = $"--app -t {Ticket} -j \"{joinScriptUrl}\" -b {BrowserTrackerID} --launchtime={LaunchTime}";
+                        Roblox.Arguments = $"-t {Ticket} -j \"{joinScriptUrl}\" -b {BrowserTrackerID} --launchtime={LaunchTime}";
 
                         Process RbxProcess = Process.Start(Roblox);
                         Program.Logger.Info($"Launched RobloxPlayerBeta.exe for {Username} (PID: {RbxProcess?.Id}, TrackerID: {BrowserTrackerID})");
 
-                        // Step 3: Wait for Roblox window to appear (proves Byfron unpack & singleton check passed)
+                        // Wait for Roblox window to appear (proves Byfron unpack & game engine started)
                         if (RbxProcess != null && !RbxProcess.HasExited)
                         {
                             DateTime timeout = DateTime.Now.AddSeconds(30);
@@ -740,9 +740,8 @@ namespace RBX_Alt_Manager
                             }
                         }
 
-                        // Step 4: Re-acquire the mutex after launch so next instance also bypasses singleton
-                        await Task.Delay(800);
-                        AccountManager.Instance.ReacquireMutexAfterLaunch();
+                        // Give it a brief buffer for window stability before signaling next account
+                        await Task.Delay(500);
 
                         // Signal launcher: safe to proceed to next account
                         AccountManager.Instance.NextAccount();
@@ -750,9 +749,6 @@ namespace RBX_Alt_Manager
                     }
                     catch (Exception x)
                     {
-                        // Re-acquire mutex even on failure
-                        AccountManager.Instance.ReacquireMutexAfterLaunch();
-
                         Utilities.InvokeIfRequired(AccountManager.Instance, () => MessageBox.Show($"ERROR: Failed to launch Roblox!\n\n{x.Message}{x.StackTrace}", "Roblox Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Error));
                         AccountManager.Instance.CancelLaunching();
                         AccountManager.Instance.NextAccount();
